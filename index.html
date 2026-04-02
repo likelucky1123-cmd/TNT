@@ -1,851 +1,681 @@
-import React, { useState, useEffect } from 'react';
-import { Star, Plus, Image as ImageIcon, DollarSign, Calendar, Trash2, X, Upload, Heart, LogOut, User, Mail, Lock, AlertCircle, ArrowRight, Edit3, Camera, PiggyBank, History, Wallet, TrendingDown, TrendingUp, CreditCard, CheckCircle2, Tag, Popcorn } from 'lucide-react';
-
-// === Firebase Imports ===
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, serverTimestamp, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-
-// === Initialize Firebase OUTSIDE component ===
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-// 定義商品分類
-const CATEGORIES = ['小卡', '專輯', '娃娃', '野周', '其他'];
-
-export default function App() {
-  // === 狀態管理 ===
-  const [user, setUser] = useState(null); 
-  const [authLoading, setAuthLoading] = useState(true);
-  const [items, setItems] = useState([]); // 戰利品(花費)
-  const [funds, setFunds] = useState([]); // 追星基金(存入)
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>7小時</title>
   
-  // 分類與手勢狀態
-  const [activeCategory, setActiveCategory] = useState('全部');
-  const [swipedItemId, setSwipedItemId] = useState(null);
-  const [touchStartX, setTouchStartX] = useState(0);
+  <!-- 載入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
   
-  // UI 控制
-  const [isModalOpen, setIsModalOpen] = useState(false); 
-  const [editingId, setEditingId] = useState(null); 
-  const [isProfileOpen, setIsProfileOpen] = useState(false); 
-  const [isFundModalOpen, setIsFundModalOpen] = useState(false); 
-  const [isFundHistoryOpen, setIsFundHistoryOpen] = useState(false); 
-  const [isLoading, setIsLoading] = useState(false);
+  <!-- 載入 FontAwesome 圖標庫 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
-  // 模擬登入系統狀態
-  const [isMockLoggedIn, setIsMockLoggedIn] = useState(false);
-  const [registeredAuth, setRegisteredAuth] = useState(null);
-  
-  // 個人資料狀態
-  const [profileData, setProfileData] = useState({ nickname: '', bio: '', avatar: null, dashboardBg: null });
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  <!-- 載入 React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  // 認證表單狀態
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '' });
-  const [authError, setAuthError] = useState('');
-  const [authSuccess, setAuthSuccess] = useState('');
-  const [isAuthProcessing, setIsAuthProcessing] = useState(false);
+  <style>
+    /* 隱藏滾動條但保持可滾動 */
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const [newItem, setNewItem] = useState({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
-  const [newFund, setNewFund] = useState({ amount: '', reason: '', date: todayStr });
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
 
-  // === 1. 初始化 Firebase 認證 ===
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth); 
-        }
-      } catch (error) { console.error("Auth init error:", error); }
-    };
-    initAuth();
+    const CATEGORIES = ['小卡', '專輯', '娃娃', '野周', '其他'];
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        try {
-          const authRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'auth');
-          const authSnap = await getDoc(authRef);
-          if (authSnap.exists()) {
-            setRegisteredAuth(authSnap.data());
+    function App() {
+      // === 狀態管理 (使用 Local Storage) ===
+      const [items, setItems] = useState([]); 
+      const [funds, setFunds] = useState([]); 
+      const [profileData, setProfileData] = useState({ nickname: '專屬用戶', bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
+      const [registeredAuth, setRegisteredAuth] = useState(null);
+      const [isMockLoggedIn, setIsMockLoggedIn] = useState(false);
+      const [appLoaded, setAppLoaded] = useState(false);
+
+      // UI 控制
+      const [activeCategory, setActiveCategory] = useState('全部');
+      const [swipedItemId, setSwipedItemId] = useState(null);
+      const [touchStartX, setTouchStartX] = useState(0);
+      const [isModalOpen, setIsModalOpen] = useState(false); 
+      const [editingId, setEditingId] = useState(null); 
+      const [isProfileOpen, setIsProfileOpen] = useState(false); 
+      const [isFundModalOpen, setIsFundModalOpen] = useState(false); 
+      const [isFundHistoryOpen, setIsFundHistoryOpen] = useState(false); 
+      
+      // 認證表單狀態
+      const [isLoginMode, setIsLoginMode] = useState(true);
+      const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '' });
+      const [authError, setAuthError] = useState('');
+      const [authSuccess, setAuthSuccess] = useState('');
+
+      const fileInputRef = useRef(null);
+      const avatarInputRef = useRef(null);
+      const dashboardBgInputRef = useRef(null);
+      
+      const todayStr = new Date().toISOString().split('T')[0];
+      const [newItem, setNewItem] = useState({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
+      const [newFund, setNewFund] = useState({ amount: '', reason: '', date: todayStr });
+
+      // === 1. 初始化讀取 Local Storage 資料 ===
+      useEffect(() => {
+        const loadData = () => {
+          try {
+            const savedAuth = localStorage.getItem('stanchase_auth');
+            if (savedAuth) setRegisteredAuth(JSON.parse(savedAuth));
+            
             if (localStorage.getItem('stanchase_isLoggedIn') === 'true') {
               setIsMockLoggedIn(true);
+              
+              const savedItems = localStorage.getItem('stanchase_items');
+              if (savedItems) setItems(JSON.parse(savedItems));
+              
+              const savedFunds = localStorage.getItem('stanchase_funds');
+              if (savedFunds) setFunds(JSON.parse(savedFunds));
+              
+              const savedProfile = localStorage.getItem('stanchase_profile');
+              if (savedProfile) setProfileData(JSON.parse(savedProfile));
             }
+          } catch(e) {
+            console.error("載入資料失敗", e);
           }
-        } catch(e) { console.error("Fetch auth status error", e); }
-      }
-      setAuthLoading(false);
-    });
-    
-    return () => unsubscribe();
-  }, []);
+          setAppLoaded(true);
+        };
+        loadData();
+      }, []);
 
-  // === 2. 獲取資料 ===
-  useEffect(() => {
-    if (!user || !isMockLoggedIn) {
-      setItems([]); setFunds([]); return;
-    }
-
-    const fetchProfile = async () => {
-      try {
-        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
-        const docSnap = await getDoc(profileRef);
-        if (docSnap.exists()) { setProfileData(docSnap.data()); } 
-        else {
-          const defaultEmail = registeredAuth?.email || 'user';
-          setProfileData({ nickname: defaultEmail.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
+      // === 輔助函數：儲存資料到 Local Storage (含容量防爆滿) ===
+      const saveItems = (newItems) => {
+        setItems(newItems);
+        try {
+          localStorage.setItem('stanchase_items', JSON.stringify(newItems));
+        } catch(e) {
+          alert("手機網頁儲存空間已滿！請刪除一些舊紀錄或照片以騰出空間。");
         }
-      } catch (err) { console.error("Fetch profile error", err); }
-    };
-    fetchProfile();
+      };
+      
+      const saveFunds = (newFunds) => {
+        setFunds(newFunds);
+        try { localStorage.setItem('stanchase_funds', JSON.stringify(newFunds)); } catch(e) {}
+      };
 
-    const itemsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'stanchases');
-    const unsubscribeItems = onSnapshot(query(itemsRef), (snapshot) => {
-        const fetchedItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        fetchedItems.sort((a, b) => {
-            if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
-            return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
-        });
-        setItems(fetchedItems);
-      }, (error) => console.error("Error fetching items:", error)
-    );
-
-    const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
-    const unsubscribeFunds = onSnapshot(query(fundsRef), (snapshot) => {
-        const fetchedFunds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        fetchedFunds.sort((a, b) => {
-            if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
-            return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
-        });
-        setFunds(fetchedFunds);
-      }, (error) => console.error("Error fetching funds:", error)
-    );
-
-    return () => { unsubscribeItems(); unsubscribeFunds(); };
-  }, [user, isMockLoggedIn, registeredAuth]);
-
-  // === 登入/註冊/登出處理 ===
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError(''); setAuthSuccess(''); setIsAuthProcessing(true);
-
-    try {
-      if (!isLoginMode) {
-        if (authForm.password !== authForm.confirmPassword) {
-          setAuthError('兩次輸入的密碼不一致，請重新確認！'); setIsAuthProcessing(false); return;
+      const saveProfile = (newProfile) => {
+        setProfileData(newProfile);
+        try {
+          localStorage.setItem('stanchase_profile', JSON.stringify(newProfile));
+        } catch(e) {
+          alert("照片容量過大或儲存空間已滿，部分設定可能無法儲存！");
         }
-        const authRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'auth');
-        await setDoc(authRef, { email: authForm.email, password: authForm.password });
-        setRegisteredAuth({ email: authForm.email, password: authForm.password });
-        setAuthSuccess('註冊成功！請重新登入以進入專屬小金庫。');
-        setIsLoginMode(true);
-        setAuthForm({ ...authForm, password: '', confirmPassword: '' });
-      } else {
-        if (!registeredAuth) { setAuthError('系統找不到您的帳號，請先切換到「註冊」建立帳號喔！'); } 
-        else if (authForm.email === registeredAuth.email && authForm.password === registeredAuth.password) {
-           setIsMockLoggedIn(true); localStorage.setItem('stanchase_isLoggedIn', 'true');
-        } else { setAuthError('帳號或密碼輸入錯誤，請再試一次。'); }
-      }
-    } catch(err) { setAuthError('連線發生錯誤，請稍後再試。'); } 
-    finally { setIsAuthProcessing(false); }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('stanchase_isLoggedIn'); setIsMockLoggedIn(false);
-    setAuthForm({ ...authForm, password: '', confirmPassword: '' });
-    setAuthSuccess(''); setIsProfileOpen(false);
-  };
-
-  // === 修復後：照片上傳處理模組 ===
-  const handleAvatarUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      // 確保使用 window.Image 防止與 UI 框架撞名當機
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const SIZE = 200;
-        const minSize = Math.min(img.width, img.height);
-        const startX = (img.width - minSize) / 2; const startY = (img.height - minSize) / 2;
-        canvas.width = SIZE; canvas.height = SIZE;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, startX, startY, minSize, minSize, 0, 0, SIZE, SIZE);
-        setProfileData(prev => ({ ...prev, avatar: canvas.toDataURL('image/jpeg', 0.8) }));
       };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-    e.target.value = ''; // 安全清除 input 狀態，讓同張照片可以再次選取
-  };
 
-  const handleDashboardBgUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        const MAX_WIDTH = 800; // 適當壓縮確保不超過容量限制
-        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        setProfileData(prev => ({ ...prev, dashboardBg: canvas.toDataURL('image/jpeg', 0.7) }));
-      };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
+      // === 登入/註冊/登出處理 ===
+      const handleAuthSubmit = (e) => {
+        e.preventDefault();
+        setAuthError(''); setAuthSuccess('');
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > height) { if (width > 500) { height *= 500 / width; width = 500; } } 
-        else { if (height > 500) { width *= 500 / height; height = 500; } }
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        setNewItem(prev => ({ ...prev, image: canvas.toDataURL('image/jpeg', 0.7) }));
-      };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
-
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-    setIsSavingProfile(true);
-    try {
-      const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
-      await setDoc(profileRef, profileData);
-      setIsProfileOpen(false);
-    } catch (error) { console.error("Error saving profile", error); } 
-    finally { setIsSavingProfile(false); }
-  };
-
-  // === 增刪修 資料處理 ===
-  const handleSaveItem = async (e) => {
-    e.preventDefault();
-    if (!newItem.name || !newItem.price || !user) return;
-    setIsLoading(true);
-    try {
-      if (editingId) {
-        const itemRef = doc(db, 'artifacts', appId, 'users', user.uid, 'stanchases', editingId);
-        await updateDoc(itemRef, {
-          name: newItem.name, price: parseFloat(newItem.price), date: newItem.date, image: newItem.image, category: newItem.category
-        });
-      } else {
-        const itemsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'stanchases');
-        await addDoc(itemsRef, {
-          name: newItem.name, price: parseFloat(newItem.price), date: newItem.date, image: newItem.image, category: newItem.category, createdAt: serverTimestamp()
-        });
-      }
-      closeItemModal();
-    } catch (error) { console.error("Error saving item:", error); } 
-    finally { setIsLoading(false); }
-  };
-
-  const handleDeleteItem = async (id) => {
-    if (!user) return;
-    try { 
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stanchases', id)); 
-      setSwipedItemId(null);
-    } catch (error) { console.error("Error deleting item:", error); }
-  };
-
-  const handleEditClick = (item) => {
-    setEditingId(item.id);
-    setNewItem({
-      name: item.name, price: item.price.toString(), date: item.date, image: item.image, category: item.category || '其他'
-    });
-    setSwipedItemId(null);
-    setIsModalOpen(true);
-  };
-
-  const closeItemModal = () => {
-    setIsModalOpen(false);
-    setEditingId(null);
-    setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
-  };
-
-  const handleAddFund = async (e) => {
-    e.preventDefault();
-    if (!newFund.amount || !newFund.reason || !user) return;
-    setIsLoading(true);
-    try {
-      const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
-      await addDoc(fundsRef, {
-        amount: parseFloat(newFund.amount), reason: newFund.reason, date: newFund.date, createdAt: serverTimestamp()
-      });
-      setIsFundModalOpen(false);
-      setNewFund({ amount: '', reason: '', date: todayStr });
-    } catch (error) { console.error("Error adding fund:", error); } 
-    finally { setIsLoading(false); }
-  };
-
-  const handleDeleteFund = async (id) => {
-    if (!user) return;
-    try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'funds', id)); } 
-    catch (error) { console.error("Error deleting fund:", error); }
-  };
-
-  // === 手勢控制 (左滑編輯/刪除) ===
-  const handleTouchStart = (e) => {
-    setTouchStartX(e.touches[0].clientX);
-  };
-
-  const handleTouchMove = (e, id) => {
-    if (!touchStartX) return;
-    const currentX = e.touches[0].clientX;
-    const diff = touchStartX - currentX;
-    
-    if (diff > 50) {
-      setSwipedItemId(id);
-    } else if (diff < -50 && swipedItemId === id) {
-      setSwipedItemId(null);
-    }
-  };
-
-  // === 財務計算與過濾 ===
-  const formatCurrency = (amount) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
-  const totalFunds = funds.reduce((sum, fund) => sum + (Number(fund.amount) || 0), 0);
-  const totalSpent = items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
-  const remainingBalance = totalFunds - totalSpent;
-  const displayNickname = profileData.nickname || (registeredAuth ? registeredAuth.email.split('@')[0] : '專屬用戶');
-
-  const filteredItems = activeCategory === '全部' ? items : items.filter(item => (item.category || '其他') === activeCategory);
-
-  // === 畫面渲染 ===
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-yellow-50 flex items-center justify-center">
-        <div className="animate-pulse flex flex-col items-center">
-          <Star className="w-12 h-12 text-yellow-400 mb-4 animate-spin-slow" />
-          <p className="text-yellow-600 font-medium">還原記憶中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // === 登入與註冊介面 ===
-  if (!isMockLoggedIn) {
-    const hasAccount = !!registeredAuth;
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-xl border border-yellow-100">
-          <div className="text-center mb-8">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
-              <Popcorn className="w-10 h-10 text-yellow-500" />
-            </div>
-            <h1 className="text-2xl font-bold text-slate-800">追星記帳本</h1>
-            <p className="text-slate-500 text-sm mt-2">
-              {isLoginMode ? '歡迎回來！我們為你保管著心血紀錄' : '建立專屬帳號，資料永不遺失'}
-            </p>
-          </div>
-
-          <form onSubmit={handleAuthSubmit} className="space-y-5">
-            {authError && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-start gap-2 animate-in fade-in">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <p className="leading-snug">{authError}</p>
-              </div>
-            )}
-            
-            {authSuccess && isLoginMode && (
-              <div className="bg-green-50 text-green-600 p-3 rounded-xl text-sm flex items-start gap-2 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <p className="leading-snug font-medium">{authSuccess}</p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Email 信箱</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                </div>
-                <input 
-                  type="email" required value={authForm.email} onChange={(e) => setAuthForm({...authForm, email: e.target.value})}
-                  className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all"
-                  placeholder="your@email.com"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">密碼</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                  <Lock className="w-4 h-4 text-slate-400" />
-                </div>
-                <input 
-                  type="password" required value={authForm.password} onChange={(e) => setAuthForm({...authForm, password: e.target.value})}
-                  className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all"
-                  placeholder="至少 6 個字元" minLength={6}
-                />
-              </div>
-            </div>
-
-            {!isLoginMode && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">再一次輸入密碼</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <Lock className="w-4 h-4 text-slate-400" />
-                  </div>
-                  <input 
-                    type="password" required={!isLoginMode} value={authForm.confirmPassword} onChange={(e) => setAuthForm({...authForm, confirmPassword: e.target.value})}
-                    className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all"
-                    placeholder="請再次輸入相同的密碼" minLength={6}
-                  />
-                </div>
-              </div>
-            )}
-
-            <button type="submit" disabled={isAuthProcessing} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 mt-6 ${isAuthProcessing ? 'bg-yellow-400 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600 hover:-translate-y-0.5 hover:shadow-lg'}`}>
-              {isAuthProcessing ? <Star className="w-5 h-5 animate-spin-slow" /> : <>{isLoginMode ? '進入展示櫃' : '完成註冊綁定'}<ArrowRight className="w-4 h-4" /></>}
-            </button>
-          </form>
-
-          {!hasAccount && (
-            <div className="mt-8 text-center border-t border-slate-100 pt-6">
-              <p className="text-slate-500 text-sm mb-2">{isLoginMode ? '第一次使用嗎？' : '已經有帳號了？'}</p>
-              <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); setAuthSuccess(''); setAuthForm({ ...authForm, confirmPassword: '' }); }} className="text-yellow-500 hover:text-yellow-600 text-sm font-bold transition-colors px-4 py-2 rounded-full hover:bg-yellow-50">
-                {isLoginMode ? '點此註冊新帳號' : '返回登入'}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // === 主畫面 ===
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-24 sm:pb-8 relative overflow-x-hidden">
-      {/* 標頭 */}
-      <header className="bg-white shadow-sm sticky top-0 z-20">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-yellow-500">
-            <Popcorn className="w-6 h-6" />
-            <h1 className="text-xl font-bold tracking-wide hidden sm:block">我的追星記帳本</h1>
-          </div>
+        if (!isLoginMode) {
+          if (authForm.password !== authForm.confirmPassword) {
+            setAuthError('兩次輸入的密碼不一致，請重新確認！'); return;
+          }
+          const newAuth = { email: authForm.email, password: authForm.password };
           
-          <div className="flex items-center gap-3">
-            <button onClick={() => setIsProfileOpen(true)} className="flex items-center gap-2 bg-slate-50 hover:bg-yellow-50 px-2 py-1.5 rounded-full border border-slate-200 transition-colors cursor-pointer group shadow-sm" title="編輯個人資料">
-                {profileData.avatar ? (
-                  <img src={profileData.avatar} alt="avatar" className="w-7 h-7 rounded-full object-cover border border-yellow-200" />
-                ) : (
-                  <div className="w-7 h-7 bg-yellow-100 group-hover:bg-yellow-200 rounded-full flex items-center justify-center text-yellow-600 transition-colors"><User className="w-4 h-4" /></div>
-                )}
-                <span className="text-sm font-medium text-slate-700 max-w-[100px] sm:max-w-[150px] truncate pr-2">{displayNickname}</span>
-            </button>
-            <button onClick={() => { setEditingId(null); setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' }); setIsModalOpen(true); }} className="hidden sm:flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-full transition-colors font-medium shadow-sm">
-              <Plus className="w-4 h-4" /><span>記一筆花費</span>
-            </button>
-          </div>
-        </div>
-      </header>
+          try {
+            localStorage.setItem('stanchase_auth', JSON.stringify(newAuth));
+            setRegisteredAuth(newAuth);
+            setAuthSuccess('註冊成功！請重新登入以進入專屬小金庫。');
+            setIsLoginMode(true);
+            setAuthForm({ ...authForm, password: '', confirmPassword: '' });
+            
+            // 初始化個人資料
+            saveProfile({ nickname: authForm.email.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
+          } catch(e) {
+            setAuthError('瀏覽器不支援記憶功能或空間不足，無法註冊。');
+          }
+        } else {
+          if (!registeredAuth) { 
+            setAuthError('系統找不到您的帳號，請先切換到「註冊」建立帳號喔！'); 
+          } else if (authForm.email === registeredAuth.email && authForm.password === registeredAuth.password) {
+             setIsMockLoggedIn(true); 
+             try { localStorage.setItem('stanchase_isLoggedIn', 'true'); } catch(e){}
+          } else { 
+            setAuthError('帳號或密碼輸入錯誤，請再試一次。'); 
+          }
+        }
+      };
 
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+      const handleLogout = () => {
+        localStorage.removeItem('stanchase_isLoggedIn'); 
+        setIsMockLoggedIn(false);
+        setAuthForm({ email: registeredAuth?.email || '', password: '', confirmPassword: '' });
+        setAuthSuccess(''); 
+        setIsProfileOpen(false);
+      };
+
+      // === 圖片壓縮處理 ===
+      const processImage = (file, maxWidth, callback) => {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let { width, height } = img;
+            if (width > height && width > maxWidth) { height *= maxWidth / width; width = maxWidth; } 
+            else if (height > maxWidth) { width *= maxWidth / height; height = maxWidth; }
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            callback(canvas.toDataURL('image/jpeg', 0.7)); // 壓縮品質 0.7 以節省 Local Storage 容量
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const handleAvatarUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const SIZE = 200;
+            const minSize = Math.min(img.width, img.height);
+            const startX = (img.width - minSize) / 2; const startY = (img.height - minSize) / 2;
+            canvas.width = SIZE; canvas.height = SIZE;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, startX, startY, minSize, minSize, 0, 0, SIZE, SIZE);
+            saveProfile({ ...profileData, avatar: canvas.toDataURL('image/jpeg', 0.8) });
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+      };
+
+      const handleDashboardBgUpload = (e) => {
+        processImage(e.target.files[0], 800, (dataUrl) => {
+          saveProfile({ ...profileData, dashboardBg: dataUrl });
+        });
+        e.target.value = '';
+      };
+
+      const handleItemImageUpload = (e) => {
+        processImage(e.target.files[0], 500, (dataUrl) => {
+          setNewItem(prev => ({ ...prev, image: dataUrl }));
+        });
+        e.target.value = '';
+      };
+
+      const handleProfileSubmit = (e) => {
+        e.preventDefault();
+        saveProfile(profileData);
+        setIsProfileOpen(false);
+      };
+
+      // === 增刪修 資料處理 ===
+      const handleSaveItem = (e) => {
+        e.preventDefault();
+        if (!newItem.name || !newItem.price) return;
         
-        {/* 財務儀表板 (支援自定義背景) */}
-        <div className="rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden group">
-          {/* 背景層 */}
-          {profileData.dashboardBg ? (
-            <div 
-              className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-500" 
-              style={{ backgroundImage: `url(${profileData.dashboardBg})` }}
-            >
-              <div className="absolute inset-0 bg-slate-900/40"></div>
-            </div>
-          ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-yellow-400 to-amber-500 z-0"></div>
-          )}
+        let newItemsArray;
+        if (editingId) {
+          newItemsArray = items.map(item => item.id === editingId ? { ...item, ...newItem, price: parseFloat(newItem.price) } : item);
+        } else {
+          const item = { id: Date.now().toString(), ...newItem, price: parseFloat(newItem.price), createdAt: Date.now() };
+          newItemsArray = [item, ...items];
+        }
+        
+        newItemsArray.sort((a, b) => {
+          if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+          return b.createdAt - a.createdAt;
+        });
+        
+        saveItems(newItemsArray);
+        closeItemModal();
+      };
 
-          {!profileData.dashboardBg && (
-            <div className="absolute -right-8 -top-8 opacity-10 rotate-12 z-0"><CreditCard className="w-48 h-48" /></div>
-          )}
-          
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
-            <div className="space-y-6 flex-grow">
-              <div>
-                <h2 className="text-white/80 text-sm font-medium mb-1 flex items-center gap-1.5"><Wallet className="w-4 h-4" /> 目前可用追星基金</h2>
-                <div className={`text-4xl sm:text-5xl font-bold tracking-tight ${remainingBalance < 0 ? 'text-red-200' : 'text-white'}`}>{formatCurrency(remainingBalance)}</div>
+      const handleDeleteItem = (id) => {
+        const newItemsArray = items.filter(item => item.id !== id);
+        saveItems(newItemsArray);
+        setSwipedItemId(null);
+      };
+
+      const handleEditClick = (item) => {
+        setEditingId(item.id);
+        setNewItem({ name: item.name, price: item.price.toString(), date: item.date, image: item.image, category: item.category || '其他' });
+        setSwipedItemId(null);
+        setIsModalOpen(true);
+      };
+
+      const closeItemModal = () => {
+        setIsModalOpen(false);
+        setEditingId(null);
+        setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
+      };
+
+      const handleAddFund = (e) => {
+        e.preventDefault();
+        if (!newFund.amount || !newFund.reason) return;
+        
+        const fund = { id: Date.now().toString(), amount: parseFloat(newFund.amount), reason: newFund.reason, date: newFund.date, createdAt: Date.now() };
+        const newFundsArray = [fund, ...funds];
+        
+        newFundsArray.sort((a, b) => {
+          if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+          return b.createdAt - a.createdAt;
+        });
+        
+        saveFunds(newFundsArray);
+        setIsFundModalOpen(false);
+        setNewFund({ amount: '', reason: '', date: todayStr });
+      };
+
+      const handleDeleteFund = (id) => {
+        const newFundsArray = funds.filter(f => f.id !== id);
+        saveFunds(newFundsArray);
+      };
+
+      // === 手勢控制 (左滑編輯/刪除) ===
+      const handleTouchStart = (e) => setTouchStartX(e.touches[0].clientX);
+      const handleTouchMove = (e, id) => {
+        if (!touchStartX) return;
+        const diff = touchStartX - e.touches[0].clientX;
+        if (diff > 50) setSwipedItemId(id); 
+        else if (diff < -50 && swipedItemId === id) setSwipedItemId(null);
+      };
+
+      // === 財務計算 ===
+      const formatCurrency = (amount) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
+      const totalFunds = funds.reduce((sum, fund) => sum + (Number(fund.amount) || 0), 0);
+      const totalSpent = items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+      const remainingBalance = totalFunds - totalSpent;
+      const displayNickname = profileData.nickname || '專屬用戶';
+
+      const filteredItems = activeCategory === '全部' ? items : items.filter(item => (item.category || '其他') === activeCategory);
+
+      // === 畫面渲染 ===
+      if (!appLoaded) return <div className="min-h-screen flex items-center justify-center"><i className="fa-solid fa-spinner fa-spin text-yellow-400 text-4xl"></i></div>;
+
+      if (!isMockLoggedIn) {
+        const hasAccount = !!registeredAuth;
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-xl border border-yellow-100">
+              <div className="text-center mb-8">
+                <div className="text-6xl mb-4 drop-shadow-sm">🍿</div>
+                <h1 className="text-2xl font-bold text-slate-800">7小時</h1>
+                <p className="text-slate-500 text-sm mt-2">{isLoginMode ? '歡迎回來！我們為你保管著心血紀錄' : '建立專屬帳號，資料永不遺失'}</p>
               </div>
-              <div className="flex items-center gap-6 sm:gap-10">
+
+              <form onSubmit={handleAuthSubmit} className="space-y-5">
+                {authError && (<div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-exclamation mt-0.5"></i><p>{authError}</p></div>)}
+                {authSuccess && isLoginMode && (<div className="bg-green-50 text-green-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-check mt-0.5"></i><p>{authSuccess}</p></div>)}
+
                 <div>
-                  <div className="text-white/80 text-xs mb-1 flex items-center gap-1"><TrendingUp className="w-3 h-3 text-white" /> 總存入</div>
-                  <div className="text-lg font-medium">{formatCurrency(totalFunds)}</div>
-                </div>
-                <div className="w-px h-8 bg-white/30"></div>
-                <div>
-                  <div className="text-white/80 text-xs mb-1 flex items-center gap-1"><TrendingDown className="w-3 h-3 text-red-200" /> 總花費</div>
-                  <div className="text-lg font-medium">{formatCurrency(totalSpent)}</div>
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-row sm:flex-col gap-3 w-full sm:w-auto mt-4 sm:mt-0">
-              <button onClick={() => setIsFundModalOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white text-yellow-600 hover:bg-slate-50 px-5 py-3 rounded-2xl transition-all shadow-lg hover:-translate-y-0.5 font-medium">
-                <PiggyBank className="w-5 h-5" /> 餵食小金庫
-              </button>
-              <button onClick={() => setIsFundHistoryOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-black/20 hover:bg-black/30 backdrop-blur-md border border-white/20 text-white px-5 py-3 rounded-2xl transition-all font-medium">
-                <History className="w-5 h-5 text-white/80" /> 基金明細
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 戰利品區域 */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
-              <ImageIcon className="w-5 h-5 text-yellow-500" />
-              戰利品展示櫃
-            </h3>
-            <span className="text-sm text-slate-500 bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100">
-              共 {filteredItems.length} 件
-            </span>
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
-            {['全部', ...CATEGORIES].map(category => (
-              <button
-                key={category}
-                onClick={() => { setActiveCategory(category); setSwipedItemId(null); }}
-                className={`whitespace-nowrap px-5 py-2 rounded-full text-sm font-bold transition-all shadow-sm ${activeCategory === category ? 'bg-yellow-500 text-white shadow-yellow-500/30' : 'bg-white text-slate-600 border border-slate-200 hover:bg-yellow-50 hover:text-yellow-600'}`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-          
-          {filteredItems.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 text-center shadow-sm border border-slate-100 flex flex-col items-center justify-center min-h-[30vh]">
-              <div className="w-20 h-20 bg-yellow-50 rounded-full flex items-center justify-center mb-4">
-                <Tag className="w-8 h-8 text-yellow-300" />
-              </div>
-              <p className="text-slate-500 font-medium">這個分類還沒有收藏喔！</p>
-              <p className="text-slate-400 text-sm mt-1 mb-6">點擊下方按鈕新增一筆吧</p>
-              <button onClick={() => { setEditingId(null); setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' }); setIsModalOpen(true); }} className="sm:hidden flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-full transition-colors font-medium shadow-sm">
-                <Plus className="w-5 h-5" /><span>記一筆花費</span>
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-              {filteredItems.map((item) => (
-                <div key={item.id} className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 shadow-sm group">
-                  
-                  <div className="absolute inset-y-0 right-0 flex w-[140px] z-0">
-                    <button onClick={() => handleEditClick(item)} className="w-1/2 bg-blue-500 text-white flex flex-col items-center justify-center hover:bg-blue-600 transition-colors">
-                      <Edit3 className="w-5 h-5 mb-1" />
-                      <span className="text-xs font-medium">編輯</span>
-                    </button>
-                    <button onClick={() => handleDeleteItem(item.id)} className="w-1/2 bg-red-500 text-white flex flex-col items-center justify-center hover:bg-red-600 transition-colors">
-                      <Trash2 className="w-5 h-5 mb-1" />
-                      <span className="text-xs font-medium">刪除</span>
-                    </button>
-                  </div>
-
-                  <div 
-                    className={`relative z-10 bg-white w-full h-full flex flex-col transition-transform duration-300 ease-in-out sm:group-hover:-translate-x-[140px] ${swipedItemId === item.id ? '-translate-x-[140px]' : 'translate-x-0'}`}
-                    onTouchStart={(e) => handleTouchStart(e)}
-                    onTouchMove={(e) => handleTouchMove(e, item.id)}
-                  >
-                    <div className="aspect-square bg-slate-50 relative overflow-hidden flex-shrink-0">
-                      {item.image ? (
-                        <img src={item.image} alt={item.name} className="w-full h-full object-cover pointer-events-none" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon className="w-12 h-12" /></div>
-                      )}
-                      <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-md text-xs font-bold text-yellow-600 shadow-sm">
-                        {item.category || '其他'}
-                      </div>
-                    </div>
-                    <div className="p-4 flex flex-col flex-grow">
-                      <h4 className="font-bold text-slate-800 line-clamp-1 flex-grow" title={item.name}>{item.name}</h4>
-                      <div className="mt-2 text-yellow-500 font-bold text-lg">{formatCurrency(item.price)}</div>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 self-start px-2 py-1 rounded-md">
-                        <Calendar className="w-3 h-3" /> {item.date}
-                      </div>
-                    </div>
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-slate-200 rounded-full sm:hidden opacity-50"></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      <button onClick={() => { setEditingId(null); setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' }); setIsModalOpen(true); }} className="sm:hidden fixed bottom-6 right-6 z-30 bg-yellow-500 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-yellow-500/30 hover:bg-yellow-600 transition-colors">
-        <Plus className="w-6 h-6" />
-      </button>
-
-      {/* Modal 1: 編輯個人資料 (包含看板背景，全面使用透明覆蓋層) */}
-      {isProfileOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Edit3 className="w-5 h-5 text-yellow-500" />編輯設定</h3>
-              <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"><X className="w-6 h-6" /></button>
-            </div>
-            <form onSubmit={handleSaveProfile} className="p-6 space-y-6">
-              
-              {/* 大頭貼編輯 (透明覆蓋層) */}
-              <div className="flex justify-center mb-2">
-                <div className="relative group cursor-pointer" title="點擊更換頭像">
-                  <input type="file" onChange={handleAvatarUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
-                  <div className="w-24 h-24 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-400 overflow-hidden shadow-inner border-2 border-transparent group-hover:border-yellow-300 transition-all relative z-10">
-                    {profileData.avatar ? <img src={profileData.avatar} alt="avatar" className="w-full h-full object-cover" /> : <User className="w-12 h-12" />}
-                  </div>
-                  <div className="absolute bottom-0 right-0 bg-yellow-500 p-1.5 rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10"><Camera className="w-4 h-4" /></div>
-                </div>
-              </div>
-
-              {/* 看板背景編輯 (透明覆蓋層) */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">財務看板自訂背景</label>
-                <div className="flex items-center gap-3">
-                  <div className={`flex-grow h-20 rounded-xl relative overflow-hidden bg-slate-50 border-2 border-dashed ${profileData.dashboardBg ? 'border-transparent' : 'border-slate-300 hover:border-yellow-400 hover:bg-yellow-50'} flex items-center justify-center transition-colors group`}>
-                    <input type="file" onChange={handleDashboardBgUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
-                    {profileData.dashboardBg ? (
-                      <>
-                        <img src={profileData.dashboardBg} className="w-full h-full object-cover z-0" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                          <span className="text-white text-xs font-bold">點擊更換</span>
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-slate-400 text-sm font-medium flex items-center gap-1 z-10"><ImageIcon className="w-4 h-4" /> 上傳自訂背景照片</span>
-                    )}
-                  </div>
-                  {profileData.dashboardBg && (
-                    <button 
-                      type="button"
-                      onClick={() => setProfileData({...profileData, dashboardBg: null})}
-                      className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10"
-                      title="恢復預設顏色"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 mt-1">若不設定或刪除照片，將使用預設黃色漸層。</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">我的暱稱</label>
-                <input type="text" value={profileData.nickname} onChange={(e) => setProfileData({...profileData, nickname: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" required />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">個性簽名</label>
-                <textarea value={profileData.bio} onChange={(e) => setProfileData({...profileData, bio: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all resize-none h-20" />
-              </div>
-
-              <div className="pt-4 space-y-3">
-                <button type="submit" disabled={isSavingProfile} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">{isSavingProfile ? <Star className="w-5 h-5 animate-spin-slow" /> : '儲存設定'}</button>
-                <button type="button" onClick={handleLogout} className="w-full bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"><LogOut className="w-4 h-4" />登出帳號</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: 新增/編輯戰利品 (透明覆蓋層) */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                {editingId ? <Edit3 className="w-5 h-5 text-yellow-500" /> : <Plus className="w-5 h-5 text-yellow-500" />}
-                {editingId ? '編輯戰利品' : '記一筆花費'}
-              </h3>
-              <button onClick={closeItemModal} disabled={isLoading} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"><X className="w-6 h-6" /></button>
-            </div>
-            <form onSubmit={handleSaveItem} className="p-6 space-y-5">
-              
-              <div>
-                <div className={`border-2 border-dashed rounded-2xl h-32 flex flex-col items-center justify-center relative overflow-hidden transition-colors hover:bg-yellow-50 group ${newItem.image ? 'border-yellow-500' : 'border-slate-300'} ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
-                  <input type="file" onChange={handleImageUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" disabled={isLoading} />
-                  {newItem.image ? (
-                    <>
-                      <img src={newItem.image} alt="Preview" className="w-full h-full object-cover z-0" />
-                      <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                        <Upload className="w-8 h-8 text-white mb-2" />
-                        <span className="text-white font-medium text-sm">更換照片</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="z-10 flex flex-col items-center">
-                      <div className="w-10 h-10 bg-yellow-100 text-yellow-500 rounded-full flex items-center justify-center mb-2"><ImageIcon className="w-5 h-5" /></div>
-                      <span className="text-slate-500 text-sm font-medium">點擊上傳照片</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">物品分類 *</label>
-                <div className="flex flex-wrap gap-2">
-                  {CATEGORIES.map(category => (
-                    <button
-                      type="button"
-                      key={category}
-                      onClick={() => setNewItem({...newItem, category})}
-                      className={`px-4 py-2 rounded-full text-sm font-bold transition-all border ${newItem.category === category ? 'bg-yellow-500 text-white border-yellow-500 shadow-sm shadow-yellow-500/30' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-yellow-50 hover:text-yellow-600 hover:border-yellow-200'}`}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">物品名稱 *</label>
-                <input type="text" required value={newItem.name} onChange={(e) => setNewItem({...newItem, name: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="例如：某某簽售專..." disabled={isLoading} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">花費金額 *</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Email 信箱</label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><DollarSign className="w-4 h-4 text-slate-400" /></div>
-                    <input type="number" required min="0" value={newItem.price} onChange={(e) => setNewItem({...newItem, price: e.target.value})} className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="0" disabled={isLoading} />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><i className="fa-solid fa-envelope text-slate-400"></i></div>
+                    <input type="email" required value={authForm.email} onChange={(e) => setAuthForm({...authForm, email: e.target.value})} className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all" placeholder="your@email.com" />
                   </div>
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">購買日期</label>
-                  <input type="date" required value={newItem.date} onChange={(e) => setNewItem({...newItem, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" disabled={isLoading} />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">密碼</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><i className="fa-solid fa-lock text-slate-400"></i></div>
+                    <input type="password" required value={authForm.password} onChange={(e) => setAuthForm({...authForm, password: e.target.value})} className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all" placeholder="至少 6 個字元" minLength={6} />
+                  </div>
                 </div>
-              </div>
 
-              <div className="pt-2">
-                <button type="submit" disabled={isLoading} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${isLoading ? 'bg-yellow-400 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600 hover:-translate-y-0.5'}`}>
-                  {isLoading ? <><Star className="w-5 h-5 animate-spin-slow" />儲存中...</> : <>{editingId ? '儲存變更' : '記錄這筆花費'}</>}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 3: 餵食小金庫 */}
-      {isFundModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><PiggyBank className="w-6 h-6 text-green-500" />餵食小金庫</h3>
-              <button onClick={() => setIsFundModalOpen(false)} disabled={isLoading} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"><X className="w-6 h-6" /></button>
-            </div>
-            
-            <form onSubmit={handleAddFund} className="p-6 space-y-5">
-              <div className="bg-green-50 text-green-700 text-sm p-3 rounded-xl flex items-start gap-2 mb-2">
-                <Star className="w-4 h-4 mt-0.5 flex-shrink-0 fill-current" />
-                <p>有閒錢了嗎？把它存入小金庫，為下次的應援做準備！</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">餵食金額 *</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><DollarSign className="w-5 h-5 text-green-500" /></div>
-                  <input 
-                    type="number" required min="1" value={newFund.amount} 
-                    onChange={(e) => setNewFund({...newFund, amount: e.target.value})} 
-                    className="w-full pl-10 pr-4 py-4 text-xl font-bold rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-green-600" 
-                    placeholder="0" disabled={isLoading} 
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">資金來源 / 原因 *</label>
-                <input type="text" required value={newFund.reason} onChange={(e) => setNewFund({...newFund, reason: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" placeholder="例如：發薪水、賣掉舊周邊..." disabled={isLoading} />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">存入日期</label>
-                <input type="date" required value={newFund.date} onChange={(e) => setNewFund({...newFund, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" disabled={isLoading} />
-              </div>
-
-              <div className="pt-2">
-                <button type="submit" disabled={isLoading} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${isLoading ? 'bg-green-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 hover:-translate-y-0.5'}`}>
-                  {isLoading ? <><Star className="w-5 h-5 animate-spin-slow" />處理中...</> : <><TrendingUp className="w-5 h-5" />確認餵食</>}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 4: 基金明細 */}
-      {isFundHistoryOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10 rounded-t-3xl">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-slate-500" />小金庫餵食明細</h3>
-                <p className="text-sm text-slate-500 mt-1">目前總共存入了 {formatCurrency(totalFunds)}</p>
-              </div>
-              <button onClick={() => setIsFundHistoryOpen(false)} className="text-slate-400 hover:text-slate-600 p-2 -mr-2 rounded-full hover:bg-slate-100 transition-colors"><X className="w-6 h-6" /></button>
-            </div>
-            
-            <div className="overflow-y-auto p-4 flex-grow">
-              {funds.length === 0 ? (
-                <div className="py-12 text-center">
-                  <PiggyBank className="w-16 h-16 text-slate-200 mx-auto mb-3" />
-                  <p className="text-slate-500">目前還沒有存入任何基金喔</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {funds.map((fund) => (
-                    <div key={fund.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-between group hover:border-green-100 hover:bg-green-50/30 transition-colors">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center flex-shrink-0">
-                          <TrendingUp className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-800">{fund.reason}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">{fund.date}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold text-green-600 text-lg">+{formatCurrency(fund.amount)}</span>
-                        <button onClick={() => handleDeleteFund(fund.id)} className="text-slate-300 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all sm:flex hidden" title="刪除此筆紀錄"><Trash2 className="w-4 h-4" /></button>
-                      </div>
+                {!isLoginMode && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">再一次輸入密碼</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><i className="fa-solid fa-lock text-slate-400"></i></div>
+                      <input type="password" required={!isLoginMode} value={authForm.confirmPassword} onChange={(e) => setAuthForm({...authForm, confirmPassword: e.target.value})} className="w-full pl-10 pr-4 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 transition-all" placeholder="請再次輸入相同的密碼" minLength={6} />
                     </div>
-                  ))}
-                  <p className="text-center text-xs text-slate-400 pt-4 pb-2">（從電腦版將滑鼠移至紀錄上方可刪除誤植資料）</p>
+                  </div>
+                )}
+
+                <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 mt-6">
+                  {isLoginMode ? '進入展示櫃' : '完成註冊綁定'} <i className="fa-solid fa-arrow-right"></i>
+                </button>
+              </form>
+
+              {!hasAccount && (
+                <div className="mt-8 text-center border-t border-slate-100 pt-6">
+                  <p className="text-slate-500 text-sm mb-2">{isLoginMode ? '第一次使用嗎？' : '已經有帳號了？'}</p>
+                  <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); setAuthSuccess(''); setAuthForm({ ...authForm, confirmPassword: '' }); }} className="text-yellow-500 hover:text-yellow-600 text-sm font-bold px-4 py-2 rounded-full hover:bg-yellow-50 transition-colors">
+                    {isLoginMode ? '點此註冊新帳號' : '返回登入'}
+                  </button>
                 </div>
               )}
             </div>
           </div>
+        );
+      }
+
+      // === 主畫面 ===
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-800 pb-24 sm:pb-8 relative overflow-x-hidden">
+          {/* 標頭 */}
+          <header className="bg-white shadow-sm sticky top-0 z-20">
+            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-yellow-500">
+                <span className="text-2xl">🍿</span>
+                <h1 className="text-xl font-bold tracking-wide hidden sm:block text-slate-800">7小時</h1>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setIsProfileOpen(true)} className="flex items-center gap-2 bg-slate-50 hover:bg-yellow-50 px-2 py-1.5 rounded-full border border-slate-200 transition-colors shadow-sm">
+                    {profileData.avatar ? (
+                      <img src={profileData.avatar} alt="avatar" className="w-7 h-7 rounded-full object-cover border border-yellow-200" />
+                    ) : (
+                      <div className="w-7 h-7 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600"><i className="fa-solid fa-user text-xs"></i></div>
+                    )}
+                    <span className="text-sm font-medium text-slate-700 max-w-[100px] truncate pr-2">{displayNickname}</span>
+                </button>
+                <button onClick={() => { closeItemModal(); setIsModalOpen(true); }} className="hidden sm:flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-full transition-colors font-medium shadow-sm">
+                  <i className="fa-solid fa-plus"></i><span>記一筆花費</span>
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+            
+            {/* 財務儀表板 */}
+            <div className="rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden group">
+              {profileData.dashboardBg ? (
+                <div className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-500" style={{ backgroundImage: `url(${profileData.dashboardBg})` }}>
+                  <div className="absolute inset-0 bg-slate-900/40"></div>
+                </div>
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-yellow-400 to-amber-500 z-0"></div>
+              )}
+
+              {!profileData.dashboardBg && (<div className="absolute -right-8 -top-8 opacity-10 rotate-12 z-0"><i className="fa-solid fa-credit-card text-[180px]"></i></div>)}
+              
+              <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+                <div className="space-y-6 flex-grow">
+                  <div>
+                    <h2 className="text-white/90 text-sm font-medium mb-1 flex items-center gap-1.5"><i className="fa-solid fa-wallet"></i> 目前可用追星基金</h2>
+                    <div className={`text-4xl sm:text-5xl font-bold tracking-tight ${remainingBalance < 0 ? 'text-red-200' : 'text-white'}`}>{formatCurrency(remainingBalance)}</div>
+                  </div>
+                  <div className="flex items-center gap-6 sm:gap-10">
+                    <div>
+                      <div className="text-white/80 text-xs mb-1 flex items-center gap-1"><i className="fa-solid fa-arrow-trend-up text-white"></i> 總存入</div>
+                      <div className="text-lg font-medium">{formatCurrency(totalFunds)}</div>
+                    </div>
+                    <div className="w-px h-8 bg-white/30"></div>
+                    <div>
+                      <div className="text-white/80 text-xs mb-1 flex items-center gap-1"><i className="fa-solid fa-arrow-trend-down text-red-200"></i> 總花費</div>
+                      <div className="text-lg font-medium">{formatCurrency(totalSpent)}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-row sm:flex-col gap-3 w-full sm:w-auto mt-4 sm:mt-0">
+                  <button onClick={() => setIsFundModalOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white text-yellow-600 hover:bg-slate-50 px-5 py-3 rounded-2xl transition-all shadow-lg font-medium">
+                    <i className="fa-solid fa-piggy-bank"></i> 餵食小金庫
+                  </button>
+                  <button onClick={() => setIsFundHistoryOpen(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-black/20 hover:bg-black/30 backdrop-blur-md border border-white/20 text-white px-5 py-3 rounded-2xl transition-all font-medium">
+                    <i className="fa-solid fa-clock-rotate-left text-white/80"></i> 基金明細
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 戰利品區域 */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                  <i className="fa-solid fa-image text-yellow-500"></i> 戰利品展示櫃
+                </h3>
+                <span className="text-sm text-slate-500 bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100">共 {filteredItems.length} 件</span>
+              </div>
+
+              <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
+                {['全部', ...CATEGORIES].map(category => (
+                  <button key={category} onClick={() => { setActiveCategory(category); setSwipedItemId(null); }} className={`whitespace-nowrap px-5 py-2 rounded-full text-sm font-bold transition-all shadow-sm ${activeCategory === category ? 'bg-yellow-500 text-white shadow-yellow-500/30' : 'bg-white text-slate-600 border border-slate-200 hover:bg-yellow-50 hover:text-yellow-600'}`}>
+                    {category}
+                  </button>
+                ))}
+              </div>
+              
+              {filteredItems.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 text-center shadow-sm border border-slate-100 flex flex-col items-center justify-center min-h-[30vh]">
+                  <div className="w-20 h-20 bg-yellow-50 rounded-full flex items-center justify-center mb-4 text-3xl"><i className="fa-solid fa-tag text-yellow-300"></i></div>
+                  <p className="text-slate-500 font-medium">這個分類還沒有收藏喔！</p>
+                  <p className="text-slate-400 text-sm mt-1 mb-6">點擊下方按鈕新增一筆吧</p>
+                  <button onClick={() => { closeItemModal(); setIsModalOpen(true); }} className="sm:hidden flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-full transition-colors font-medium shadow-sm">
+                    <i className="fa-solid fa-plus"></i><span>記一筆花費</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                  {filteredItems.map((item) => (
+                    <div key={item.id} className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 shadow-sm group">
+                      <div className="absolute inset-y-0 right-0 flex w-[140px] z-0">
+                        <button onClick={() => handleEditClick(item)} className="w-1/2 bg-blue-500 text-white flex flex-col items-center justify-center hover:bg-blue-600 transition-colors"><i className="fa-solid fa-pen-to-square mb-1 text-lg"></i><span className="text-xs font-medium">編輯</span></button>
+                        <button onClick={() => handleDeleteItem(item.id)} className="w-1/2 bg-red-500 text-white flex flex-col items-center justify-center hover:bg-red-600 transition-colors"><i className="fa-solid fa-trash-can mb-1 text-lg"></i><span className="text-xs font-medium">刪除</span></button>
+                      </div>
+                      <div className={`relative z-10 bg-white w-full h-full flex flex-col transition-transform duration-300 ease-in-out sm:group-hover:-translate-x-[140px] ${swipedItemId === item.id ? '-translate-x-[140px]' : 'translate-x-0'}`} onTouchStart={handleTouchStart} onTouchMove={(e) => handleTouchMove(e, item.id)}>
+                        <div className="aspect-square bg-slate-50 relative overflow-hidden flex-shrink-0">
+                          {item.image ? (<img src={item.image} className="w-full h-full object-cover pointer-events-none" />) : (<div className="w-full h-full flex items-center justify-center text-slate-300 text-4xl"><i className="fa-solid fa-image"></i></div>)}
+                          <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-md text-xs font-bold text-yellow-600 shadow-sm">{item.category || '其他'}</div>
+                        </div>
+                        <div className="p-4 flex flex-col flex-grow">
+                          <h4 className="font-bold text-slate-800 line-clamp-1 flex-grow" title={item.name}>{item.name}</h4>
+                          <div className="mt-2 text-yellow-500 font-bold text-lg">{formatCurrency(item.price)}</div>
+                          <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 self-start px-2 py-1 rounded-md"><i className="fa-solid fa-calendar-day"></i> {item.date}</div>
+                        </div>
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-slate-200 rounded-full sm:hidden opacity-50"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </main>
+
+          <button onClick={() => { closeItemModal(); setIsModalOpen(true); }} className="sm:hidden fixed bottom-6 right-6 z-30 bg-yellow-500 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-yellow-500/30 hover:bg-yellow-600 transition-colors text-xl">
+            <i className="fa-solid fa-plus"></i>
+          </button>
+
+          {/* Modal: 編輯個人資料 */}
+          {isProfileOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200 max-h-[90vh] overflow-y-auto">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                  <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><i className="fa-solid fa-pen-to-square text-yellow-500"></i>編輯設定</h3>
+                  <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                </div>
+                <form onSubmit={handleProfileSubmit} className="p-6 space-y-6">
+                  
+                  {/* 大頭貼編輯區 - 修復為正圓形 */}
+                  <div className="flex justify-center mb-2">
+                    <div className="relative cursor-pointer group">
+                      <input type="file" onChange={handleAvatarUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
+                      <div className="w-24 h-24 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-400 overflow-hidden shadow-inner border-2 border-transparent group-hover:border-yellow-300 transition-all relative z-10 text-4xl">
+                        {profileData.avatar ? <img src={profileData.avatar} className="w-full h-full object-cover" /> : <i className="fa-solid fa-user"></i>}
+                      </div>
+                      <div className="absolute bottom-0 right-0 bg-yellow-500 w-8 h-8 flex items-center justify-center rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10 text-sm">
+                        <i className="fa-solid fa-camera"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">財務看板自訂背景</label>
+                    <div className="flex items-center gap-3">
+                      <div className={`flex-grow h-20 rounded-xl relative overflow-hidden bg-slate-50 border-2 border-dashed ${profileData.dashboardBg ? 'border-transparent' : 'border-slate-300 hover:border-yellow-400 hover:bg-yellow-50'} flex items-center justify-center transition-colors group`}>
+                        <input type="file" onChange={handleDashboardBgUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
+                        {profileData.dashboardBg ? (
+                          <><img src={profileData.dashboardBg} className="w-full h-full object-cover z-0" /><div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"><span className="text-white text-xs font-bold">點擊更換</span></div></>
+                        ) : (<span className="text-slate-400 text-sm font-medium flex items-center gap-1 z-10"><i className="fa-solid fa-image"></i> 上傳自訂背景照片</span>)}
+                      </div>
+                      {profileData.dashboardBg && (<button type="button" onClick={() => saveProfile({...profileData, dashboardBg: null})} className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10 text-lg"><i className="fa-solid fa-trash-can"></i></button>)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">我的暱稱</label>
+                    <input type="text" value={profileData.nickname} onChange={(e) => setProfileData({...profileData, nickname: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" required />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">個性簽名</label>
+                    <textarea value={profileData.bio} onChange={(e) => setProfileData({...profileData, bio: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all resize-none h-20" />
+                  </div>
+
+                  <div className="pt-4 space-y-3">
+                    <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">儲存設定</button>
+                    <button type="button" onClick={handleLogout} className="w-full bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"><i className="fa-solid fa-right-from-bracket"></i> 登出帳號</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 新增/編輯戰利品 */}
+          {isModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 text-yellow-500">
+                    <i className={editingId ? "fa-solid fa-pen-to-square" : "fa-solid fa-plus"}></i> <span className="text-slate-800">{editingId ? '編輯戰利品' : '記一筆花費'}</span>
+                  </h3>
+                  <button onClick={closeItemModal} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                </div>
+                <form onSubmit={handleSaveItem} className="p-6 space-y-5">
+                  <div>
+                    <div className={`border-2 border-dashed rounded-2xl h-32 flex flex-col items-center justify-center relative overflow-hidden transition-colors hover:bg-yellow-50 group ${newItem.image ? 'border-yellow-500' : 'border-slate-300'}`}>
+                      <input type="file" onChange={handleItemImageUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
+                      {newItem.image ? (
+                        <><img src={newItem.image} className="w-full h-full object-cover z-0" /><div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"><i className="fa-solid fa-upload text-white mb-2 text-2xl"></i><span className="text-white font-medium text-sm">更換照片</span></div></>
+                      ) : (<div className="z-10 flex flex-col items-center"><div className="w-10 h-10 bg-yellow-100 text-yellow-500 rounded-full flex items-center justify-center mb-2 text-lg"><i className="fa-solid fa-image"></i></div><span className="text-slate-500 text-sm font-medium">點擊上傳照片</span></div>)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">物品分類 *</label>
+                    <div className="flex flex-wrap gap-2">
+                      {CATEGORIES.map(c => (
+                        <button type="button" key={c} onClick={() => setNewItem({...newItem, category: c})} className={`px-4 py-2 rounded-full text-sm font-bold transition-all border ${newItem.category === c ? 'bg-yellow-500 text-white border-yellow-500 shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{c}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">物品名稱 *</label>
+                    <input type="text" required value={newItem.name} onChange={(e) => setNewItem({...newItem, name: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="例如：某某簽售專..." />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">花費金額 *</label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i className="fa-solid fa-dollar-sign text-slate-400"></i></div>
+                        <input type="number" required min="0" value={newItem.price} onChange={(e) => setNewItem({...newItem, price: e.target.value})} className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">購買日期</label>
+                      <input type="date" required value={newItem.date} onChange={(e) => setNewItem({...newItem, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" />
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2">{editingId ? '儲存變更' : '記錄這筆花費'}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 餵食小金庫 */}
+          {isFundModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in duration-200">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><i className="fa-solid fa-piggy-bank text-green-500"></i>餵食小金庫</h3>
+                  <button onClick={() => setIsFundModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                </div>
+                <form onSubmit={handleAddFund} className="p-6 space-y-5">
+                  <div className="bg-green-50 text-green-700 text-sm p-3 rounded-xl flex items-start gap-2 mb-2"><i className="fa-solid fa-star mt-0.5"></i><p>把它存入小金庫，為下次的應援做準備！</p></div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">餵食金額 *</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i className="fa-solid fa-dollar-sign text-green-500"></i></div>
+                      <input type="number" required min="1" value={newFund.amount} onChange={(e) => setNewFund({...newFund, amount: e.target.value})} className="w-full pl-10 pr-4 py-4 text-xl font-bold rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-green-600" placeholder="0" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">資金來源 / 原因 *</label>
+                    <input type="text" required value={newFund.reason} onChange={(e) => setNewFund({...newFund, reason: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" placeholder="例如：發薪水、省下飲料錢..." />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">存入日期</label>
+                    <input type="date" required value={newFund.date} onChange={(e) => setNewFund({...newFund, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" />
+                  </div>
+                  <div className="pt-2">
+                    <button type="submit" className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2"><i className="fa-solid fa-arrow-trend-up"></i> 確認餵食</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 基金明細 */}
+          {isFundHistoryOpen && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
+                <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10 rounded-t-3xl">
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><i className="fa-solid fa-clock-rotate-left text-slate-500"></i>小金庫餵食明細</h3>
+                    <p className="text-sm text-slate-500 mt-1">目前總共存入了 {formatCurrency(totalFunds)}</p>
+                  </div>
+                  <button onClick={() => setIsFundHistoryOpen(false)} className="text-slate-400 hover:text-slate-600 p-2 -mr-2 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                </div>
+                <div className="overflow-y-auto p-4 flex-grow">
+                  {funds.length === 0 ? (
+                    <div className="py-12 text-center text-slate-200 text-6xl mb-3"><i className="fa-solid fa-piggy-bank"></i><p className="text-slate-500 text-base mt-4 font-bold">目前還沒有存入任何基金喔</p></div>
+                  ) : (
+                    <div className="space-y-3">
+                      {funds.map((fund) => (
+                        <div key={fund.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-between group hover:border-green-100 hover:bg-green-50/30 transition-colors">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center flex-shrink-0 text-lg"><i className="fa-solid fa-arrow-trend-up"></i></div>
+                            <div>
+                              <p className="font-bold text-slate-800">{fund.reason}</p>
+                              <p className="text-xs text-slate-400 mt-0.5">{fund.date}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-bold text-green-600 text-lg">+{formatCurrency(fund.amount)}</span>
+                            <button onClick={() => handleDeleteFund(fund.id)} className="text-slate-300 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all sm:flex hidden"><i className="fa-solid fa-trash-can"></i></button>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-center text-xs text-slate-400 pt-4 pb-2">（從電腦版將滑鼠移至紀錄上方可刪除）</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </div>
-  );
-}
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
 
 
