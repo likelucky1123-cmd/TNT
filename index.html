@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>7小時</title>
   
-  <link rel="icon" href="icon.png">
-  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" href="IMG_2669.jpeg">
+  <link rel="apple-touch-icon" href="IMG_2669.jpeg">
 
   <!-- 載入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -34,7 +34,7 @@
     import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, serverTimestamp, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // =========================================================================
-    // ⚠️⚠️⚠️ 貼上後，請把這裡的 firebaseConfig 替換成你從 Firebase 複製的金鑰！ ⚠️⚠️⚠️
+    // ✅ 你的 Firebase 金鑰已經完美寫入！
     // =========================================================================
     const firebaseConfig = {
       apiKey: "AIzaSyB61WhtRoryNtUdcTnoZyPpXdMCl0UjbpU",
@@ -48,33 +48,15 @@
     };
     // =========================================================================
 
-    // === 安全防護網：檢查金鑰是否已經填寫 ===
-    const isConfigInvalid = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("請貼上");
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'stanchase-app-v1'; // 資料庫路徑前綴
 
-    let app, auth, db;
-    if (!isConfigInvalid) {
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    }
-    
-    const appId = 'stanchase-app-v1';
     const { useState, useEffect, useRef } = React;
     const CATEGORIES = ['小卡', '專輯', '娃娃', '野周', '其他'];
 
     function App() {
-      // 若金鑰無效，顯示錯誤防護畫面 (防止以前那種白畫面打不開的情況)
-      if (isConfigInvalid) {
-        return (
-          <div className="min-h-screen bg-yellow-50 flex flex-col items-center justify-center p-6 text-center">
-            <div className="text-6xl mb-4">⚠️</div>
-            <h1 className="text-2xl font-bold text-red-500 mb-2">App 暫時無法開啟</h1>
-            <p className="text-slate-700 font-medium">因為你還沒有填寫 Firebase 的專屬金鑰喔！</p>
-            <p className="text-slate-500 text-sm mt-4">請打開程式碼的第 36 行，將從 Firebase 複製的金鑰貼上後，再重新整理網頁。</p>
-          </div>
-        );
-      }
-
       // === 狀態管理 ===
       const [user, setUser] = useState(null); 
       const [authLoading, setAuthLoading] = useState(true);
@@ -159,7 +141,7 @@
         return () => { unsubscribeItems(); unsubscribeFunds(); };
       }, [user]);
 
-      // === 修復流程：註冊成功後強制登出並返回登入 ===
+      // === 註冊成功後強制登出並返回登入 ===
       const handleAuthSubmit = async (e) => {
         e.preventDefault();
         setAuthError(''); setAuthSuccess(''); setIsAuthProcessing(true);
@@ -189,7 +171,7 @@
             case 'auth/email-already-in-use': setAuthError('信箱已註冊，請直接登入！'); break;
             case 'auth/invalid-credential': setAuthError('帳號或密碼錯誤！'); break;
             case 'auth/weak-password': setAuthError('密碼太短，至少需6個字元！'); break;
-            default: setAuthError('連線錯誤，請確認金鑰是否正確填寫。');
+            default: setAuthError('連線錯誤，請稍後再試。');
           }
         } finally { 
           setIsAuthProcessing(false); 
@@ -427,7 +409,6 @@
                 <h1 className="text-xl font-bold tracking-wide hidden sm:block text-slate-800">7小時</h1>
               </div>
               <div className="flex items-center gap-3">
-                {/* 點擊頭像編輯資料 - 安全防護避免 profileData 為空 */}
                 <button onClick={() => setIsProfileOpen(true)} className="flex items-center gap-2 bg-slate-50 hover:bg-yellow-50 px-2 py-1.5 rounded-full border border-slate-200 transition-colors shadow-sm">
                     {profileData?.avatar ? (
                       <img src={profileData.avatar} alt="avatar" className="w-7 h-7 rounded-full object-cover border border-yellow-200" />
@@ -551,7 +532,7 @@
                 </div>
                 <form onSubmit={handleSaveProfile} className="p-6 space-y-6">
                   
-                  {/* 修復相機按鈕為正圓形 (w-8 h-8 rounded-full flex items-center justify-center) */}
+                  {/* 相機按鈕已經是正圓形 w-8 h-8 rounded-full */}
                   <div className="flex justify-center mb-2">
                     <div className="relative cursor-pointer group">
                       <input type="file" onChange={handleAvatarUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
