@@ -5,12 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>7小時</title>
   
-  <link rel="icon" href="IMG_2669.jpeg">
-  <link rel="apple-touch-icon" href="IMG_2669.jpeg">
+  <link rel="icon" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
 
+  <!-- 載入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 載入 FontAwesome 圖標庫 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
+  <!-- 載入 React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -44,21 +48,41 @@
     };
     // =========================================================================
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = 'stanchase-app-v1';
+    // === 安全防護網：檢查金鑰是否已經填寫 ===
+    const isConfigInvalid = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("請貼上");
 
+    let app, auth, db;
+    if (!isConfigInvalid) {
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+    }
+    
+    const appId = 'stanchase-app-v1';
     const { useState, useEffect, useRef } = React;
     const CATEGORIES = ['小卡', '專輯', '娃娃', '野周', '其他'];
 
     function App() {
+      // 若金鑰無效，顯示錯誤防護畫面 (防止以前那種白畫面打不開的情況)
+      if (isConfigInvalid) {
+        return (
+          <div className="min-h-screen bg-yellow-50 flex flex-col items-center justify-center p-6 text-center">
+            <div className="text-6xl mb-4">⚠️</div>
+            <h1 className="text-2xl font-bold text-red-500 mb-2">App 暫時無法開啟</h1>
+            <p className="text-slate-700 font-medium">因為你還沒有填寫 Firebase 的專屬金鑰喔！</p>
+            <p className="text-slate-500 text-sm mt-4">請打開程式碼的第 36 行，將從 Firebase 複製的金鑰貼上後，再重新整理網頁。</p>
+          </div>
+        );
+      }
+
+      // === 狀態管理 ===
       const [user, setUser] = useState(null); 
       const [authLoading, setAuthLoading] = useState(true);
       const [items, setItems] = useState([]); 
       const [funds, setFunds] = useState([]); 
-      const [profileData, setProfileData] = useState({ nickname: '專屬用戶', bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
+      const [profileData, setProfileData] = useState({ nickname: '', bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
       
+      // UI 控制
       const [activeCategory, setActiveCategory] = useState('全部');
       const [swipedItemId, setSwipedItemId] = useState(null);
       const [touchStartX, setTouchStartX] = useState(0);
@@ -69,6 +93,7 @@
       const [isFundHistoryOpen, setIsFundHistoryOpen] = useState(false); 
       const [isLoading, setIsLoading] = useState(false);
       
+      // 認證表單狀態
       const [isLoginMode, setIsLoginMode] = useState(true);
       const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '' });
       const [authError, setAuthError] = useState('');
@@ -100,8 +125,11 @@
           try {
             const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
             const docSnap = await getDoc(profileRef);
-            if (docSnap.exists()) { setProfileData(docSnap.data()); } 
-            else { setProfileData({ nickname: user.email.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null }); }
+            if (docSnap.exists()) { 
+              setProfileData(docSnap.data() || {}); 
+            } else { 
+              setProfileData({ nickname: user.email.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null }); 
+            }
           } catch (err) { console.error("Fetch profile error", err); }
         };
         fetchProfile();
@@ -131,6 +159,7 @@
         return () => { unsubscribeItems(); unsubscribeFunds(); };
       }, [user]);
 
+      // === 修復流程：註冊成功後強制登出並返回登入 ===
       const handleAuthSubmit = async (e) => {
         e.preventDefault();
         setAuthError(''); setAuthSuccess(''); setIsAuthProcessing(true);
@@ -140,8 +169,19 @@
             if (authForm.password !== authForm.confirmPassword) {
               setAuthError('兩次輸入的密碼不一致，請重新確認！'); setIsAuthProcessing(false); return;
             }
+            // 創建帳號
             await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
+            
+            // 創建後立刻登出，避免直接進入主畫面
+            await signOut(auth);
+            
+            // 切換回登入模式，清空密碼，顯示成功訊息
+            setAuthSuccess('註冊成功！請重新輸入密碼登入。');
+            setIsLoginMode(true);
+            setAuthForm({ ...authForm, password: '', confirmPassword: '' });
+
           } else {
+            // 正常登入
             await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
           }
         } catch(error) { 
@@ -168,7 +208,7 @@
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
-          const img = new Image();
+          const img = new window.Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
             let { width, height } = img;
@@ -189,7 +229,7 @@
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
-          const img = new Image();
+          const img = new window.Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
             const SIZE = 200;
@@ -198,7 +238,7 @@
             canvas.width = SIZE; canvas.height = SIZE;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, startX, startY, minSize, minSize, 0, 0, SIZE, SIZE);
-            setProfileData(prev => ({ ...prev, avatar: canvas.toDataURL('image/jpeg', 0.7) }));
+            setProfileData(prev => ({ ...(prev || {}), avatar: canvas.toDataURL('image/jpeg', 0.7) }));
           };
           img.src = event.target.result;
         };
@@ -208,7 +248,7 @@
 
       const handleDashboardBgUpload = (e) => {
         processImage(e.target.files[0], 600, (dataUrl) => {
-          setProfileData(prev => ({ ...prev, dashboardBg: dataUrl }));
+          setProfileData(prev => ({ ...(prev || {}), dashboardBg: dataUrl }));
         });
         e.target.value = '';
       };
@@ -315,12 +355,12 @@
       const totalFunds = funds.reduce((sum, fund) => sum + (Number(fund.amount) || 0), 0);
       const totalSpent = items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
       const remainingBalance = totalFunds - totalSpent;
-      const displayNickname = profileData.nickname || '專屬用戶';
+      const displayNickname = profileData?.nickname || '專屬用戶';
 
-      const filteredItems = activeCategory === '全部' ? items : items.filter(item => (item.category || '其他') === activeCategory);
+      // 載入中畫面
+      if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-yellow-50"><i className="fa-solid fa-spinner fa-spin text-yellow-400 text-4xl"></i></div>;
 
-      if (authLoading) return <div className="min-h-screen flex items-center justify-center"><i className="fa-solid fa-spinner fa-spin text-yellow-400 text-4xl"></i></div>;
-
+      // === 登入與註冊介面 ===
       if (!user) {
         return (
           <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-50 flex items-center justify-center p-4">
@@ -333,6 +373,7 @@
 
               <form onSubmit={handleAuthSubmit} className="space-y-5">
                 {authError && (<div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-exclamation mt-0.5"></i><p>{authError}</p></div>)}
+                {authSuccess && isLoginMode && (<div className="bg-green-50 text-green-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-check mt-0.5"></i><p>{authSuccess}</p></div>)}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email 信箱</label>
@@ -361,7 +402,7 @@
                 )}
 
                 <button type="submit" disabled={isAuthProcessing} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 mt-6 ${isAuthProcessing ? 'bg-yellow-400 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600 hover:-translate-y-0.5 hover:shadow-lg'}`}>
-                  {isAuthProcessing ? <i className="fa-solid fa-spinner fa-spin"></i> : <>{isLoginMode ? '進入展示櫃' : '完成註冊綁定'} <i className="fa-solid fa-arrow-right"></i></>}
+                  {isAuthProcessing ? <i className="fa-solid fa-spinner fa-spin"></i> : <>{isLoginMode ? '登入帳號' : '完成註冊綁定'} <i className="fa-solid fa-arrow-right"></i></>}
                 </button>
               </form>
 
@@ -376,6 +417,7 @@
         );
       }
 
+      // === 主畫面 ===
       return (
         <div className="min-h-screen bg-slate-50 text-slate-800 pb-24 sm:pb-8 relative overflow-x-hidden">
           <header className="bg-white shadow-sm sticky top-0 z-20">
@@ -385,8 +427,9 @@
                 <h1 className="text-xl font-bold tracking-wide hidden sm:block text-slate-800">7小時</h1>
               </div>
               <div className="flex items-center gap-3">
+                {/* 點擊頭像編輯資料 - 安全防護避免 profileData 為空 */}
                 <button onClick={() => setIsProfileOpen(true)} className="flex items-center gap-2 bg-slate-50 hover:bg-yellow-50 px-2 py-1.5 rounded-full border border-slate-200 transition-colors shadow-sm">
-                    {profileData.avatar ? (
+                    {profileData?.avatar ? (
                       <img src={profileData.avatar} alt="avatar" className="w-7 h-7 rounded-full object-cover border border-yellow-200" />
                     ) : (
                       <div className="w-7 h-7 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600"><i className="fa-solid fa-user text-xs"></i></div>
@@ -401,8 +444,9 @@
           </header>
 
           <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+            {/* 財務儀表板 */}
             <div className="rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden group">
-              {profileData.dashboardBg ? (
+              {profileData?.dashboardBg ? (
                 <div className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-500" style={{ backgroundImage: `url(${profileData.dashboardBg})` }}>
                   <div className="absolute inset-0 bg-slate-900/40"></div>
                 </div>
@@ -410,7 +454,7 @@
                 <div className="absolute inset-0 bg-gradient-to-br from-yellow-400 to-amber-500 z-0"></div>
               )}
 
-              {!profileData.dashboardBg && (<div className="absolute -right-8 -top-8 opacity-10 rotate-12 z-0"><i className="fa-solid fa-credit-card text-[180px]"></i></div>)}
+              {!profileData?.dashboardBg && (<div className="absolute -right-8 -top-8 opacity-10 rotate-12 z-0"><i className="fa-solid fa-credit-card text-[180px]"></i></div>)}
               
               <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
                 <div className="space-y-6 flex-grow">
@@ -497,6 +541,7 @@
             <i className="fa-solid fa-plus"></i>
           </button>
 
+          {/* Modal: 編輯個人資料 */}
           {isProfileOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200 max-h-[90vh] overflow-y-auto">
@@ -505,37 +550,41 @@
                   <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
                 </div>
                 <form onSubmit={handleSaveProfile} className="p-6 space-y-6">
+                  
+                  {/* 修復相機按鈕為正圓形 (w-8 h-8 rounded-full flex items-center justify-center) */}
                   <div className="flex justify-center mb-2">
                     <div className="relative cursor-pointer group">
                       <input type="file" onChange={handleAvatarUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
                       <div className="w-24 h-24 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-400 overflow-hidden shadow-inner border-2 border-transparent group-hover:border-yellow-300 transition-all relative z-10 text-4xl">
-                        {profileData.avatar ? <img src={profileData.avatar} className="w-full h-full object-cover" /> : <i className="fa-solid fa-user"></i>}
+                        {profileData?.avatar ? <img src={profileData.avatar} className="w-full h-full object-cover" /> : <i className="fa-solid fa-user"></i>}
                       </div>
-                      <div className="absolute bottom-0 right-0 bg-yellow-500 w-8 h-8 flex items-center justify-center rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10 text-sm"><i className="fa-solid fa-camera"></i></div>
+                      <div className="absolute bottom-0 right-0 bg-yellow-500 w-8 h-8 flex items-center justify-center rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10 text-sm">
+                        <i className="fa-solid fa-camera"></i>
+                      </div>
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">財務看板自訂背景</label>
                     <div className="flex items-center gap-3">
-                      <div className={`flex-grow h-20 rounded-xl relative overflow-hidden bg-slate-50 border-2 border-dashed ${profileData.dashboardBg ? 'border-transparent' : 'border-slate-300 hover:border-yellow-400 hover:bg-yellow-50'} flex items-center justify-center transition-colors group`}>
+                      <div className={`flex-grow h-20 rounded-xl relative overflow-hidden bg-slate-50 border-2 border-dashed ${profileData?.dashboardBg ? 'border-transparent' : 'border-slate-300 hover:border-yellow-400 hover:bg-yellow-50'} flex items-center justify-center transition-colors group`}>
                         <input type="file" onChange={handleDashboardBgUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
-                        {profileData.dashboardBg ? (
+                        {profileData?.dashboardBg ? (
                           <><img src={profileData.dashboardBg} className="w-full h-full object-cover z-0" /><div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"><span className="text-white text-xs font-bold">點擊更換</span></div></>
                         ) : (<span className="text-slate-400 text-sm font-medium flex items-center gap-1 z-10"><i className="fa-solid fa-image"></i> 上傳自訂背景照片</span>)}
                       </div>
-                      {profileData.dashboardBg && (<button type="button" onClick={() => setProfileData({...profileData, dashboardBg: null})} className="w-12 h-12 flex items-center justify-center bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10 text-lg"><i className="fa-solid fa-trash-can"></i></button>)}
+                      {profileData?.dashboardBg && (<button type="button" onClick={() => setProfileData({...profileData, dashboardBg: null})} className="w-12 h-12 flex items-center justify-center bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10 text-lg"><i className="fa-solid fa-trash-can"></i></button>)}
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">我的暱稱</label>
-                    <input type="text" value={profileData.nickname} onChange={(e) => setProfileData({...profileData, nickname: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" required />
+                    <input type="text" value={profileData?.nickname || ''} onChange={(e) => setProfileData({...profileData, nickname: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" required />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">個性簽名</label>
-                    <textarea value={profileData.bio} onChange={(e) => setProfileData({...profileData, bio: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all resize-none h-20" />
+                    <textarea value={profileData?.bio || ''} onChange={(e) => setProfileData({...profileData, bio: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all resize-none h-20" />
                   </div>
 
                   <div className="pt-4 space-y-3">
@@ -549,6 +598,7 @@
             </div>
           )}
 
+          {/* Modal: 新增/編輯戰利品 */}
           {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200">
@@ -602,6 +652,7 @@
             </div>
           )}
 
+          {/* Modal: 餵食小金庫 */}
           {isFundModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in duration-200">
@@ -636,6 +687,7 @@
             </div>
           )}
 
+          {/* Modal: 基金明細 */}
           {isFundHistoryOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
