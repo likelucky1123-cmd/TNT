@@ -3,24 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>7個小時</title>
-
+  <title>7小時</title>
+  
   <link rel="icon" href="IMG_2669.jpeg">
   <link rel="apple-touch-icon" href="IMG_2669.jpeg">
 
-  <!-- 載入 Tailwind CSS (處理排版與顏色) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- 載入 FontAwesome 圖標庫 (處理所有的 icon) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
-  <!-- 載入 React 核心 (讓瀏覽器看得懂 React) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    /* 隱藏滾動條但保持可滾動 */
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -29,22 +24,34 @@
 <body class="bg-slate-50 text-slate-800">
   <div id="root"></div>
 
-  <!-- 下面是應用程式邏輯 -->
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+  <script type="text/babel" data-type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, serverTimestamp, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+    // =========================================================================
+    // ⚠️⚠️⚠️ 貼上後，請把這裡的 firebaseConfig 替換成你從 Firebase 複製的金鑰！ ⚠️⚠️⚠️
+    // =========================================================================
+    const firebaseConfig = {
+      QRhNzTlgSVwYpJjLvNaiNMZpzid-reVCQPz0nRHtu9s
+    };
+    // =========================================================================
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'stanchase-app-v1';
+
+    const { useState, useEffect, useRef } = React;
     const CATEGORIES = ['小卡', '專輯', '娃娃', '野周', '其他'];
 
     function App() {
-      // === 狀態管理 (使用瀏覽器本地記憶 Local Storage) ===
+      const [user, setUser] = useState(null); 
+      const [authLoading, setAuthLoading] = useState(true);
       const [items, setItems] = useState([]); 
       const [funds, setFunds] = useState([]); 
       const [profileData, setProfileData] = useState({ nickname: '專屬用戶', bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
-      const [registeredAuth, setRegisteredAuth] = useState(null);
-      const [isMockLoggedIn, setIsMockLoggedIn] = useState(false);
-      const [appLoaded, setAppLoaded] = useState(false);
-
-      // UI 控制
+      
       const [activeCategory, setActiveCategory] = useState('全部');
       const [swipedItemId, setSwipedItemId] = useState(null);
       const [touchStartX, setTouchStartX] = useState(0);
@@ -53,12 +60,13 @@
       const [isProfileOpen, setIsProfileOpen] = useState(false); 
       const [isFundModalOpen, setIsFundModalOpen] = useState(false); 
       const [isFundHistoryOpen, setIsFundHistoryOpen] = useState(false); 
+      const [isLoading, setIsLoading] = useState(false);
       
-      // 認證表單狀態
       const [isLoginMode, setIsLoginMode] = useState(true);
       const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '' });
       const [authError, setAuthError] = useState('');
       const [authSuccess, setAuthSuccess] = useState('');
+      const [isAuthProcessing, setIsAuthProcessing] = useState(false);
 
       const fileInputRef = useRef(null);
       const avatarInputRef = useRef(null);
@@ -68,94 +76,87 @@
       const [newItem, setNewItem] = useState({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
       const [newFund, setNewFund] = useState({ amount: '', reason: '', date: todayStr });
 
-      // === 1. 初始化：載入本地記憶體 ===
       useEffect(() => {
-        const loadData = () => {
-          try {
-            const savedAuth = localStorage.getItem('stanchase_auth');
-            if (savedAuth) setRegisteredAuth(JSON.parse(savedAuth));
-            
-            if (localStorage.getItem('stanchase_isLoggedIn') === 'true') {
-              setIsMockLoggedIn(true);
-              
-              const savedItems = localStorage.getItem('stanchase_items');
-              if (savedItems) setItems(JSON.parse(savedItems));
-              
-              const savedFunds = localStorage.getItem('stanchase_funds');
-              if (savedFunds) setFunds(JSON.parse(savedFunds));
-              
-              const savedProfile = localStorage.getItem('stanchase_profile');
-              if (savedProfile) setProfileData(JSON.parse(savedProfile));
-            }
-          } catch(e) {
-            console.error("載入資料失敗", e);
-          }
-          setAppLoaded(true);
-        };
-        loadData();
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          setUser(currentUser);
+          setAuthLoading(false);
+        });
+        return () => unsubscribe();
       }, []);
 
-      // === 輔助函數：儲存資料到 Local Storage ===
-      const saveItems = (newItems) => {
-        setItems(newItems);
-        try { localStorage.setItem('stanchase_items', JSON.stringify(newItems)); } 
-        catch(e) { alert("手機網頁儲存空間已滿！請刪除一些舊紀錄或照片以騰出空間。"); }
-      };
-      
-      const saveFunds = (newFunds) => {
-        setFunds(newFunds);
-        try { localStorage.setItem('stanchase_funds', JSON.stringify(newFunds)); } catch(e) {}
-      };
+      useEffect(() => {
+        if (!user) {
+          setItems([]); setFunds([]); return;
+        }
 
-      const saveProfile = (newProfile) => {
-        setProfileData(newProfile);
-        try { localStorage.setItem('stanchase_profile', JSON.stringify(newProfile)); } 
-        catch(e) { alert("照片容量過大或空間已滿，部分設定可能無法儲存！"); }
-      };
-
-      // === 登入/註冊處理 ===
-      const handleAuthSubmit = (e) => {
-        e.preventDefault();
-        setAuthError(''); setAuthSuccess('');
-
-        if (!isLoginMode) {
-          if (authForm.password !== authForm.confirmPassword) {
-            setAuthError('兩次輸入的密碼不一致，請重新確認！'); return;
-          }
-          const newAuth = { email: authForm.email, password: authForm.password };
-          
+        const fetchProfile = async () => {
           try {
-            localStorage.setItem('stanchase_auth', JSON.stringify(newAuth));
-            setRegisteredAuth(newAuth);
-            setAuthSuccess('註冊成功！請重新登入以進入專屬小金庫。');
-            setIsLoginMode(true);
-            setAuthForm({ ...authForm, password: '', confirmPassword: '' });
-            
-            saveProfile({ nickname: authForm.email.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null });
-          } catch(e) {
-            setAuthError('瀏覽器不支援記憶功能或空間不足，無法註冊。');
+            const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+            const docSnap = await getDoc(profileRef);
+            if (docSnap.exists()) { setProfileData(docSnap.data()); } 
+            else { setProfileData({ nickname: user.email.split('@')[0], bio: '努力為愛發電，聰明控制預算！', avatar: null, dashboardBg: null }); }
+          } catch (err) { console.error("Fetch profile error", err); }
+        };
+        fetchProfile();
+
+        const itemsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'stanchases');
+        const unsubscribeItems = onSnapshot(query(itemsRef), (snapshot) => {
+            const fetchedItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            fetchedItems.sort((a, b) => {
+                if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+                return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+            });
+            setItems(fetchedItems);
+          }, (error) => console.error("Error fetching items:", error)
+        );
+
+        const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
+        const unsubscribeFunds = onSnapshot(query(fundsRef), (snapshot) => {
+            const fetchedFunds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            fetchedFunds.sort((a, b) => {
+                if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+                return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+            });
+            setFunds(fetchedFunds);
+          }, (error) => console.error("Error fetching funds:", error)
+        );
+
+        return () => { unsubscribeItems(); unsubscribeFunds(); };
+      }, [user]);
+
+      const handleAuthSubmit = async (e) => {
+        e.preventDefault();
+        setAuthError(''); setAuthSuccess(''); setIsAuthProcessing(true);
+
+        try {
+          if (!isLoginMode) {
+            if (authForm.password !== authForm.confirmPassword) {
+              setAuthError('兩次輸入的密碼不一致，請重新確認！'); setIsAuthProcessing(false); return;
+            }
+            await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
+          } else {
+            await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
           }
-        } else {
-          if (!registeredAuth) { 
-            setAuthError('系統找不到您的帳號，請先切換到「註冊」喔！'); 
-          } else if (authForm.email === registeredAuth.email && authForm.password === registeredAuth.password) {
-             setIsMockLoggedIn(true); 
-             try { localStorage.setItem('stanchase_isLoggedIn', 'true'); } catch(e){}
-          } else { 
-            setAuthError('帳號或密碼輸入錯誤，請再試一次。'); 
+        } catch(error) { 
+          switch (error.code) {
+            case 'auth/email-already-in-use': setAuthError('信箱已註冊，請直接登入！'); break;
+            case 'auth/invalid-credential': setAuthError('帳號或密碼錯誤！'); break;
+            case 'auth/weak-password': setAuthError('密碼太短，至少需6個字元！'); break;
+            default: setAuthError('連線錯誤，請確認金鑰是否正確填寫。');
           }
+        } finally { 
+          setIsAuthProcessing(false); 
         }
       };
 
-      const handleLogout = () => {
-        localStorage.removeItem('stanchase_isLoggedIn'); 
-        setIsMockLoggedIn(false);
-        setAuthForm({ email: registeredAuth?.email || '', password: '', confirmPassword: '' });
-        setAuthSuccess(''); 
-        setIsProfileOpen(false);
+      const handleLogout = async () => {
+        try {
+          await signOut(auth);
+          setAuthForm({ email: user?.email || '', password: '', confirmPassword: '' });
+          setIsProfileOpen(false);
+        } catch(e) { console.error(e); }
       };
 
-      // === 圖片壓縮處理 ===
       const processImage = (file, maxWidth, callback) => {
         if (!file) return;
         const reader = new FileReader();
@@ -169,7 +170,7 @@
             canvas.width = width; canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
-            callback(canvas.toDataURL('image/jpeg', 0.7)); // 壓縮以節省空間
+            callback(canvas.toDataURL('image/jpeg', 0.6));
           };
           img.src = event.target.result;
         };
@@ -190,7 +191,7 @@
             canvas.width = SIZE; canvas.height = SIZE;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, startX, startY, minSize, minSize, 0, 0, SIZE, SIZE);
-            saveProfile({ ...profileData, avatar: canvas.toDataURL('image/jpeg', 0.8) });
+            setProfileData(prev => ({ ...prev, avatar: canvas.toDataURL('image/jpeg', 0.7) }));
           };
           img.src = event.target.result;
         };
@@ -199,8 +200,8 @@
       };
 
       const handleDashboardBgUpload = (e) => {
-        processImage(e.target.files[0], 800, (dataUrl) => {
-          saveProfile({ ...profileData, dashboardBg: dataUrl });
+        processImage(e.target.files[0], 600, (dataUrl) => {
+          setProfileData(prev => ({ ...prev, dashboardBg: dataUrl }));
         });
         e.target.value = '';
       };
@@ -212,38 +213,53 @@
         e.target.value = '';
       };
 
-      const handleProfileSubmit = (e) => {
+      const handleSaveProfile = async (e) => {
         e.preventDefault();
-        saveProfile(profileData);
-        setIsProfileOpen(false);
-      };
-
-      // === 增刪修 資料處理 ===
-      const handleSaveItem = (e) => {
-        e.preventDefault();
-        if (!newItem.name || !newItem.price) return;
-        
-        let newItemsArray;
-        if (editingId) {
-          newItemsArray = items.map(item => item.id === editingId ? { ...item, ...newItem, price: parseFloat(newItem.price) } : item);
-        } else {
-          const item = { id: Date.now().toString(), ...newItem, price: parseFloat(newItem.price), createdAt: Date.now() };
-          newItemsArray = [item, ...items];
+        if (!user) return;
+        setIsSavingProfile(true);
+        try {
+          const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+          await setDoc(profileRef, profileData);
+          setIsProfileOpen(false);
+        } catch (error) { 
+          console.error("Error saving profile", error); 
+          alert("儲存失敗，可能是照片畫質太大，請重試。");
+        } finally { 
+          setIsSavingProfile(false); 
         }
-        
-        newItemsArray.sort((a, b) => {
-          if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
-          return b.createdAt - a.createdAt;
-        });
-        
-        saveItems(newItemsArray);
-        closeItemModal();
       };
 
-      const handleDeleteItem = (id) => {
-        const newItemsArray = items.filter(item => item.id !== id);
-        saveItems(newItemsArray);
-        setSwipedItemId(null);
+      const handleSaveItem = async (e) => {
+        e.preventDefault();
+        if (!newItem.name || !newItem.price || !user) return;
+        setIsLoading(true);
+        try {
+          if (editingId) {
+            const itemRef = doc(db, 'artifacts', appId, 'users', user.uid, 'stanchases', editingId);
+            await updateDoc(itemRef, {
+              name: newItem.name, price: parseFloat(newItem.price), date: newItem.date, image: newItem.image, category: newItem.category
+            });
+          } else {
+            const itemsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'stanchases');
+            await addDoc(itemsRef, {
+              name: newItem.name, price: parseFloat(newItem.price), date: newItem.date, image: newItem.image, category: newItem.category, createdAt: serverTimestamp()
+            });
+          }
+          closeItemModal();
+        } catch (error) { 
+          console.error("Error saving item:", error); 
+          alert("儲存失敗，可能是照片容量超過限制。");
+        } finally { 
+          setIsLoading(false); 
+        }
+      };
+
+      const handleDeleteItem = async (id) => {
+        if (!user) return;
+        try { 
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stanchases', id)); 
+          setSwipedItemId(null);
+        } catch (error) { console.error("Error deleting item:", error); }
       };
 
       const handleEditClick = (item) => {
@@ -259,29 +275,27 @@
         setNewItem({ name: '', price: '', date: todayStr, image: null, category: '小卡' });
       };
 
-      const handleAddFund = (e) => {
+      const handleAddFund = async (e) => {
         e.preventDefault();
-        if (!newFund.amount || !newFund.reason) return;
-        
-        const fund = { id: Date.now().toString(), amount: parseFloat(newFund.amount), reason: newFund.reason, date: newFund.date, createdAt: Date.now() };
-        const newFundsArray = [fund, ...funds];
-        
-        newFundsArray.sort((a, b) => {
-          if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
-          return b.createdAt - a.createdAt;
-        });
-        
-        saveFunds(newFundsArray);
-        setIsFundModalOpen(false);
-        setNewFund({ amount: '', reason: '', date: todayStr });
+        if (!newFund.amount || !newFund.reason || !user) return;
+        setIsLoading(true);
+        try {
+          const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
+          await addDoc(fundsRef, {
+            amount: parseFloat(newFund.amount), reason: newFund.reason, date: newFund.date, createdAt: serverTimestamp()
+          });
+          setIsFundModalOpen(false);
+          setNewFund({ amount: '', reason: '', date: todayStr });
+        } catch (error) { console.error("Error adding fund:", error); } 
+        finally { setIsLoading(false); }
       };
 
-      const handleDeleteFund = (id) => {
-        const newFundsArray = funds.filter(f => f.id !== id);
-        saveFunds(newFundsArray);
+      const handleDeleteFund = async (id) => {
+        if (!user) return;
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'funds', id)); } 
+        catch (error) { console.error("Error deleting fund:", error); }
       };
 
-      // === 手勢控制 ===
       const handleTouchStart = (e) => setTouchStartX(e.touches[0].clientX);
       const handleTouchMove = (e, id) => {
         if (!touchStartX) return;
@@ -290,7 +304,6 @@
         else if (diff < -50 && swipedItemId === id) setSwipedItemId(null);
       };
 
-      // === 財務計算 ===
       const formatCurrency = (amount) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
       const totalFunds = funds.reduce((sum, fund) => sum + (Number(fund.amount) || 0), 0);
       const totalSpent = items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
@@ -299,12 +312,9 @@
 
       const filteredItems = activeCategory === '全部' ? items : items.filter(item => (item.category || '其他') === activeCategory);
 
-      // === 畫面渲染 ===
-      if (!appLoaded) return <div className="min-h-screen flex items-center justify-center"><i className="fa-solid fa-spinner fa-spin text-yellow-400 text-4xl"></i></div>;
+      if (authLoading) return <div className="min-h-screen flex items-center justify-center"><i className="fa-solid fa-spinner fa-spin text-yellow-400 text-4xl"></i></div>;
 
-      // === 登入與註冊介面 ===
-      if (!isMockLoggedIn) {
-        const hasAccount = !!registeredAuth;
+      if (!user) {
         return (
           <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-xl border border-yellow-100">
@@ -316,7 +326,6 @@
 
               <form onSubmit={handleAuthSubmit} className="space-y-5">
                 {authError && (<div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-exclamation mt-0.5"></i><p>{authError}</p></div>)}
-                {authSuccess && isLoginMode && (<div className="bg-green-50 text-green-600 p-3 rounded-xl text-sm flex items-start gap-2"><i className="fa-solid fa-circle-check mt-0.5"></i><p>{authSuccess}</p></div>)}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email 信箱</label>
@@ -344,28 +353,24 @@
                   </div>
                 )}
 
-                <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 mt-6">
-                  {isLoginMode ? '進入展示櫃' : '完成註冊綁定'} <i className="fa-solid fa-arrow-right"></i>
+                <button type="submit" disabled={isAuthProcessing} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 mt-6 ${isAuthProcessing ? 'bg-yellow-400 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600 hover:-translate-y-0.5 hover:shadow-lg'}`}>
+                  {isAuthProcessing ? <i className="fa-solid fa-spinner fa-spin"></i> : <>{isLoginMode ? '進入展示櫃' : '完成註冊綁定'} <i className="fa-solid fa-arrow-right"></i></>}
                 </button>
               </form>
 
-              {!hasAccount && (
-                <div className="mt-8 text-center border-t border-slate-100 pt-6">
-                  <p className="text-slate-500 text-sm mb-2">{isLoginMode ? '第一次使用嗎？' : '已經有帳號了？'}</p>
-                  <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); setAuthSuccess(''); setAuthForm({ ...authForm, confirmPassword: '' }); }} className="text-yellow-500 hover:text-yellow-600 text-sm font-bold px-4 py-2 rounded-full hover:bg-yellow-50 transition-colors">
-                    {isLoginMode ? '點此註冊新帳號' : '返回登入'}
-                  </button>
-                </div>
-              )}
+              <div className="mt-8 text-center border-t border-slate-100 pt-6">
+                <p className="text-slate-500 text-sm mb-2">{isLoginMode ? '第一次使用嗎？' : '已經有帳號了？'}</p>
+                <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); setAuthSuccess(''); setAuthForm({ ...authForm, confirmPassword: '' }); }} className="text-yellow-500 hover:text-yellow-600 text-sm font-bold px-4 py-2 rounded-full hover:bg-yellow-50 transition-colors">
+                  {isLoginMode ? '點此註冊新帳號' : '返回登入'}
+                </button>
+              </div>
             </div>
           </div>
         );
       }
 
-      // === 主畫面 ===
       return (
         <div className="min-h-screen bg-slate-50 text-slate-800 pb-24 sm:pb-8 relative overflow-x-hidden">
-          {/* 標頭 */}
           <header className="bg-white shadow-sm sticky top-0 z-20">
             <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-yellow-500">
@@ -389,8 +394,6 @@
           </header>
 
           <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
-            
-            {/* 財務儀表板 */}
             <div className="rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden group">
               {profileData.dashboardBg ? (
                 <div className="absolute inset-0 bg-cover bg-center z-0 transition-all duration-500" style={{ backgroundImage: `url(${profileData.dashboardBg})` }}>
@@ -431,7 +434,6 @@
               </div>
             </div>
 
-            {/* 戰利品區域 */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
@@ -488,7 +490,6 @@
             <i className="fa-solid fa-plus"></i>
           </button>
 
-          {/* Modal: 編輯個人資料 */}
           {isProfileOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200 max-h-[90vh] overflow-y-auto">
@@ -496,17 +497,14 @@
                   <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><i className="fa-solid fa-pen-to-square text-yellow-500"></i>編輯設定</h3>
                   <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
                 </div>
-                <form onSubmit={handleProfileSubmit} className="p-6 space-y-6">
-                  
+                <form onSubmit={handleSaveProfile} className="p-6 space-y-6">
                   <div className="flex justify-center mb-2">
                     <div className="relative cursor-pointer group">
                       <input type="file" onChange={handleAvatarUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
                       <div className="w-24 h-24 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-400 overflow-hidden shadow-inner border-2 border-transparent group-hover:border-yellow-300 transition-all relative z-10 text-4xl">
                         {profileData.avatar ? <img src={profileData.avatar} className="w-full h-full object-cover" /> : <i className="fa-solid fa-user"></i>}
                       </div>
-                      <div className="absolute bottom-0 right-0 bg-yellow-500 w-8 h-8 flex items-center justify-center rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10 text-sm">
-                        <i className="fa-solid fa-camera"></i>
-                      </div>
+                      <div className="absolute bottom-0 right-0 bg-yellow-500 w-8 h-8 flex items-center justify-center rounded-full shadow-md text-white border-2 border-white group-hover:scale-110 transition-transform z-10 text-sm"><i className="fa-solid fa-camera"></i></div>
                     </div>
                   </div>
 
@@ -519,7 +517,7 @@
                           <><img src={profileData.dashboardBg} className="w-full h-full object-cover z-0" /><div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"><span className="text-white text-xs font-bold">點擊更換</span></div></>
                         ) : (<span className="text-slate-400 text-sm font-medium flex items-center gap-1 z-10"><i className="fa-solid fa-image"></i> 上傳自訂背景照片</span>)}
                       </div>
-                      {profileData.dashboardBg && (<button type="button" onClick={() => saveProfile({...profileData, dashboardBg: null})} className="w-12 h-12 flex items-center justify-center bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10 text-lg"><i className="fa-solid fa-trash-can"></i></button>)}
+                      {profileData.dashboardBg && (<button type="button" onClick={() => setProfileData({...profileData, dashboardBg: null})} className="w-12 h-12 flex items-center justify-center bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors z-10 text-lg"><i className="fa-solid fa-trash-can"></i></button>)}
                     </div>
                   </div>
 
@@ -534,7 +532,9 @@
                   </div>
 
                   <div className="pt-4 space-y-3">
-                    <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">儲存設定</button>
+                    <button type="submit" disabled={isSavingProfile} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">
+                      {isSavingProfile ? <i className="fa-solid fa-spinner fa-spin"></i> : '儲存設定'}
+                    </button>
                     <button type="button" onClick={handleLogout} className="w-full bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-600 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"><i className="fa-solid fa-right-from-bracket"></i> 登出帳號</button>
                   </div>
                 </form>
@@ -542,7 +542,6 @@
             </div>
           )}
 
-          {/* Modal: 新增/編輯戰利品 */}
           {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in duration-200">
@@ -550,12 +549,12 @@
                   <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 text-yellow-500">
                     <i className={editingId ? "fa-solid fa-pen-to-square" : "fa-solid fa-plus"}></i> <span className="text-slate-800">{editingId ? '編輯戰利品' : '記一筆花費'}</span>
                   </h3>
-                  <button onClick={closeItemModal} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                  <button onClick={closeItemModal} disabled={isLoading} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
                 </div>
                 <form onSubmit={handleSaveItem} className="p-6 space-y-5">
                   <div>
                     <div className={`border-2 border-dashed rounded-2xl h-32 flex flex-col items-center justify-center relative overflow-hidden transition-colors hover:bg-yellow-50 group ${newItem.image ? 'border-yellow-500' : 'border-slate-300'}`}>
-                      <input type="file" onChange={handleItemImageUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
+                      <input type="file" onChange={handleItemImageUpload} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" disabled={isLoading} />
                       {newItem.image ? (
                         <><img src={newItem.image} className="w-full h-full object-cover z-0" /><div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"><i className="fa-solid fa-upload text-white mb-2 text-2xl"></i><span className="text-white font-medium text-sm">更換照片</span></div></>
                       ) : (<div className="z-10 flex flex-col items-center"><div className="w-10 h-10 bg-yellow-100 text-yellow-500 rounded-full flex items-center justify-center mb-2 text-lg"><i className="fa-solid fa-image"></i></div><span className="text-slate-500 text-sm font-medium">點擊上傳照片</span></div>)}
@@ -571,36 +570,37 @@
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">物品名稱 *</label>
-                    <input type="text" required value={newItem.name} onChange={(e) => setNewItem({...newItem, name: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="例如：某某簽售專..." />
+                    <input type="text" required value={newItem.name} onChange={(e) => setNewItem({...newItem, name: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="例如：某某簽售專..." disabled={isLoading} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">花費金額 *</label>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i className="fa-solid fa-dollar-sign text-slate-400"></i></div>
-                        <input type="number" required min="0" value={newItem.price} onChange={(e) => setNewItem({...newItem, price: e.target.value})} className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="0" />
+                        <input type="number" required min="0" value={newItem.price} onChange={(e) => setNewItem({...newItem, price: e.target.value})} className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" placeholder="0" disabled={isLoading} />
                       </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">購買日期</label>
-                      <input type="date" required value={newItem.date} onChange={(e) => setNewItem({...newItem, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" />
+                      <input type="date" required value={newItem.date} onChange={(e) => setNewItem({...newItem, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all" disabled={isLoading} />
                     </div>
                   </div>
                   <div className="pt-2">
-                    <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2">{editingId ? '儲存變更' : '記錄這筆花費'}</button>
+                    <button type="submit" disabled={isLoading} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${isLoading ? 'bg-yellow-400' : 'bg-yellow-500 hover:bg-yellow-600 hover:-translate-y-0.5'}`}>
+                      {isLoading ? <i className="fa-solid fa-spinner fa-spin"></i> : (editingId ? '儲存變更' : '記錄這筆花費')}
+                    </button>
                   </div>
                 </form>
               </div>
             </div>
           )}
 
-          {/* Modal: 餵食小金庫 */}
           {isFundModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in duration-200">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><i className="fa-solid fa-piggy-bank text-green-500"></i>餵食小金庫</h3>
-                  <button onClick={() => setIsFundModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
+                  <button onClick={() => setIsFundModalOpen(false)} disabled={isLoading} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 text-xl"><i className="fa-solid fa-xmark"></i></button>
                 </div>
                 <form onSubmit={handleAddFund} className="p-6 space-y-5">
                   <div className="bg-green-50 text-green-700 text-sm p-3 rounded-xl flex items-start gap-2 mb-2"><i className="fa-solid fa-star mt-0.5"></i><p>把它存入小金庫，為下次的應援做準備！</p></div>
@@ -608,26 +608,27 @@
                     <label className="block text-sm font-medium text-slate-700 mb-1">餵食金額 *</label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i className="fa-solid fa-dollar-sign text-green-500"></i></div>
-                      <input type="number" required min="1" value={newFund.amount} onChange={(e) => setNewFund({...newFund, amount: e.target.value})} className="w-full pl-10 pr-4 py-4 text-xl font-bold rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-green-600" placeholder="0" />
+                      <input type="number" required min="1" value={newFund.amount} onChange={(e) => setNewFund({...newFund, amount: e.target.value})} className="w-full pl-10 pr-4 py-4 text-xl font-bold rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-green-600" placeholder="0" disabled={isLoading} />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">資金來源 / 原因 *</label>
-                    <input type="text" required value={newFund.reason} onChange={(e) => setNewFund({...newFund, reason: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" placeholder="例如：發薪水、省下飲料錢..." />
+                    <input type="text" required value={newFund.reason} onChange={(e) => setNewFund({...newFund, reason: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" placeholder="例如：發薪水、省下飲料錢..." disabled={isLoading} />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">存入日期</label>
-                    <input type="date" required value={newFund.date} onChange={(e) => setNewFund({...newFund, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" />
+                    <input type="date" required value={newFund.date} onChange={(e) => setNewFund({...newFund, date: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all" disabled={isLoading} />
                   </div>
                   <div className="pt-2">
-                    <button type="submit" className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2"><i className="fa-solid fa-arrow-trend-up"></i> 確認餵食</button>
+                    <button type="submit" disabled={isLoading} className={`w-full text-white font-bold py-3.5 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${isLoading ? 'bg-green-400' : 'bg-green-500 hover:bg-green-600 hover:-translate-y-0.5'}`}>
+                      {isLoading ? <i className="fa-solid fa-spinner fa-spin"></i> : <><i className="fa-solid fa-arrow-trend-up"></i> 確認餵食</>}
+                    </button>
                   </div>
                 </form>
               </div>
             </div>
           )}
 
-          {/* Modal: 基金明細 */}
           {isFundHistoryOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
